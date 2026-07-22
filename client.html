@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>La Polla Chilena</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:        #0b1220;   /* deep night */
+  --bg-card:   #131e33;
+  --bg-raised: #1a2740;
+  --border:    rgba(255,255,255,0.08);
+  --text:      #dbe4f0;
+  --text-mut:  #8a99b3;
+  --text-faint:#5b6a84;
+  --rojo:      #e63946;   /* la roja */
+  --rojo-soft: rgba(230,57,70,0.14);
+  --cobre:     #c77b3f;   /* Chilean copper — points & trophies */
+  --cobre-soft:rgba(199,123,63,0.16);
+  --verde:     #4ade80;
+  --verde-soft:rgba(74,222,128,0.12);
+  --mal:       #f87171;
+  --mal-soft:  rgba(248,113,113,0.08);
+  --azul:      #7ea8dc;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:'Archivo Narrow', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size:16px; min-height:100vh;
+}
+h1,h2,h3,.brand{ font-family:'Archivo', sans-serif; }
+button{ font-family:inherit; }
+input,select{
+  font-family:inherit; background:var(--bg); color:var(--text);
+  border:1px solid var(--border); border-radius:0.5rem; padding:0.5rem 0.7rem; font-size:1rem;
+}
+input:focus,select:focus{ outline:2px solid var(--rojo); outline-offset:1px; border-color:transparent; }
+input[type=number]{ -moz-appearance:textfield; text-align:center; }
+input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+::placeholder{ color:var(--text-faint); }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:0.35} }
+@media (prefers-reduced-motion: reduce){ *{animation:none !important; transition:none !important;} }
+
+/* Header */
+.hdr{ position:sticky; top:0; z-index:50; background:rgba(11,18,32,0.92); backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border); }
+.hdr-in{ max-width:1100px; margin:0 auto; padding:0.65rem 1rem; display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; }
+.brand{ font-weight:900; font-size:1.15rem; letter-spacing:-0.01em; color:var(--rojo); white-space:nowrap; }
+.brand .star{ color:#fff; font-size:0.8em; vertical-align:0.15em; }
+.tabs{ display:flex; gap:0.25rem; flex-wrap:wrap; }
+.tab{ padding:0.4rem 0.85rem; border-radius:0.55rem; font-size:0.88rem; cursor:pointer;
+  border:1px solid transparent; background:transparent; color:var(--text-mut); font-weight:600; }
+.tab.on{ background:var(--rojo); color:#fff; }
+.tab:not(.on):hover{ background:var(--bg-raised); color:var(--text); }
+.hdr-user{ margin-left:auto; display:flex; align-items:center; gap:0.5rem; font-size:0.85rem; color:var(--text-mut); }
+.btn{ padding:0.45rem 0.95rem; border-radius:0.55rem; border:1px solid var(--border); cursor:pointer;
+  background:var(--bg-raised); color:var(--text); font-size:0.88rem; font-weight:600; }
+.btn:hover{ border-color:var(--rojo); }
+.btn.primary{ background:var(--rojo); border-color:var(--rojo); color:#fff; }
+.btn.small{ padding:0.25rem 0.6rem; font-size:0.78rem; }
+.btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+.wrap{ max-width:1100px; margin:0 auto; padding:1rem; padding-bottom:4rem; }
+.card{ background:var(--bg-card); border:1px solid var(--border); border-radius:0.85rem; padding:1rem; }
+.muted{ color:var(--text-mut); } .faint{ color:var(--text-faint); }
+
+/* Round chips */
+.chips{ display:flex; gap:0.35rem; overflow-x:auto; padding-bottom:0.4rem; margin-bottom:0.9rem; scrollbar-width:thin; }
+.chip{ padding:0.32rem 0.75rem; border-radius:999px; font-size:0.82rem; white-space:nowrap; cursor:pointer;
+  border:1px solid var(--border); background:transparent; color:var(--text-mut); font-weight:600; }
+.chip.on{ background:var(--rojo-soft); border-color:var(--rojo); color:#ff8f98; }
+.chip.done{ opacity:0.75; }
+
+/* Fixture rows (predict) */
+.fx{ background:var(--bg-card); border:1px solid var(--border); border-radius:0.75rem;
+  padding:0.7rem 0.9rem; margin-bottom:0.5rem; display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; }
+.fx .teams{ flex:1; min-width:0; display:flex; align-items:center; gap:0.5rem; justify-content:center; }
+.fx .team{ font-weight:600; font-size:0.95rem; flex:1; }
+.fx .team.h{ text-align:right; } .fx .team.a{ text-align:left; }
+.fx .when{ font-size:0.72rem; color:var(--text-faint); width:5.6rem; }
+.fx input{ width:2.9rem; padding:0.4rem 0.2rem; font-weight:700; }
+.fx.locked{ opacity:0.85; }
+.fx .lock{ font-size:0.7rem; color:var(--text-faint); }
+.saved-dot{ color:var(--verde); font-size:0.75rem; }
+
+/* Results table */
+.res-scroll{ overflow-x:auto; border:1px solid var(--border); border-radius:0.75rem; }
+table.res{ border-collapse:collapse; width:max-content; min-width:100%; font-size:0.85rem; }
+table.res th, table.res td{ padding:0.5rem 0.55rem; border-bottom:1px solid var(--border); }
+table.res th{ background:var(--bg-raised); text-align:center; font-size:0.75rem; color:var(--text-mut);
+  position:sticky; top:0; }
+table.res th:first-child, table.res td:first-child{ position:sticky; left:0; background:var(--bg-card);
+  text-align:left; min-width:11rem; z-index:2; }
+table.res th:first-child{ background:var(--bg-raised); z-index:3; }
+td.pick{ text-align:center; font-family:ui-monospace, monospace; font-weight:600; white-space:nowrap; }
+.p-exact{ background:var(--verde-soft); color:var(--verde); }
+.p-good { background:var(--verde-soft); color:var(--verde); }
+.p-bad  { background:var(--mal-soft);  color:var(--mal); }
+.p-miss { color:var(--text-faint); font-style:italic; }
+.p-wait { color:var(--text-faint); }
+.livepill{ color:var(--mal); font-weight:800; }
+.livepill .dot{ animation:pulse 1.2s infinite; font-size:0.65rem; }
+tr.fecha-sep td{ background:var(--bg); color:var(--cobre); font-weight:700; font-size:0.72rem;
+  text-transform:uppercase; letter-spacing:0.07em; }
+
+/* Leaderboard */
+.fecha-strip{ display:flex; gap:0.4rem; overflow-x:auto; padding:0.15rem 0 0.7rem; scrollbar-width:thin; }
+.fecha-win{ flex-shrink:0; background:var(--cobre-soft); border:1px solid rgba(199,123,63,0.4);
+  border-radius:0.6rem; padding:0.35rem 0.65rem; font-size:0.78rem; }
+.fecha-win b{ color:var(--cobre); }
+table.lb{ border-collapse:collapse; width:100%; font-size:0.92rem; }
+table.lb th, table.lb td{ padding:0.6rem 0.55rem; border-bottom:1px solid var(--border); }
+table.lb th{ text-align:right; font-size:0.72rem; color:var(--text-mut); text-transform:uppercase; letter-spacing:0.05em; }
+table.lb th:nth-child(2), table.lb td:nth-child(2){ text-align:left; }
+table.lb td{ text-align:right; }
+table.lb td.rank{ text-align:center; width:2.4rem; color:var(--text-mut); }
+td.total{ color:var(--cobre); font-weight:800; font-size:1.05rem; }
+.trofeos{ color:var(--cobre); letter-spacing:0.05em; }
+
+/* Auth overlay */
+.auth-ov{ position:fixed; inset:0; z-index:100; background:var(--bg);
+  display:flex; align-items:center; justify-content:center; padding:1rem; }
+.auth-box{ width:100%; max-width:23rem; }
+.auth-box .brand{ font-size:1.9rem; display:block; text-align:center; margin-bottom:0.2rem; }
+.auth-sub{ text-align:center; color:var(--text-faint); font-size:0.85rem; margin-bottom:1.4rem; }
+.auth-box .card{ display:flex; flex-direction:column; gap:0.65rem; }
+.auth-box input{ width:100%; }
+.auth-links{ display:flex; justify-content:space-between; font-size:0.8rem; margin-top:0.2rem; }
+.auth-links a{ color:var(--azul); cursor:pointer; text-decoration:none; }
+.err{ color:var(--mal); font-size:0.83rem; }
+.recovery-code{ background:var(--bg); border:1px dashed var(--cobre); border-radius:0.6rem;
+  padding:0.8rem; text-align:center; font-family:ui-monospace,monospace; font-size:1.25rem;
+  letter-spacing:0.12em; color:var(--cobre); user-select:all; }
+
+/* Admin */
+.admin-sec{ margin-bottom:0.75rem; }
+.admin-sec summary{ cursor:pointer; font-weight:700; padding:0.75rem 1rem; user-select:none; }
+.admin-sec[open] summary{ border-bottom:1px solid var(--border); }
+.admin-body{ padding:0.9rem 1rem; display:flex; flex-direction:column; gap:0.6rem; }
+.row{ display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; }
+
+.toast{ position:fixed; bottom:1.2rem; left:50%; transform:translateX(-50%); z-index:200;
+  background:var(--bg-raised); border:1px solid var(--border); border-radius:0.6rem;
+  padding:0.6rem 1.1rem; font-size:0.88rem; box-shadow:0 8px 30px rgba(0,0,0,0.5); }
+
+@media (max-width:640px){
+  .fx .when{ width:100%; order:-1; }
+  table.res th:first-child, table.res td:first-child{ min-width:8.5rem; font-size:0.78rem; }
+  table.res th, table.res td{ padding:0.4rem 0.35rem; font-size:0.78rem; }
+  table.lb th, table.lb td{ padding:0.5rem 0.35rem; font-size:0.83rem; }
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
+const S = {
+  token: localStorage.getItem('lpc_token') || '',
+  name:  localStorage.getItem('lpc_name')  || '',
+  isAdmin: localStorage.getItem('lpc_admin') === '1',
+  tab: 'predict',            // predict | results | leaderboard | admin
+  round: null,               // selected fecha in predict/results
+  resRound: null,
+  users: [], fixtures: [], myPreds: {}, otherPreds: {}, live: {}, settings: {},
+  authView: 'login',         // login | register | forgot | showRecovery
+  authErr: '', recoveryCode: '',
+  connected: false,
+  saveState: {},             // fixtureId -> 'saving' | 'saved'
+};
+const $ = sel => document.querySelector(sel);
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg){
+  const t = document.createElement('div');
+  t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2600);
+}
+
+// ─────────────────────────────────────────────────────────────
+// API + WebSocket
+// ─────────────────────────────────────────────────────────────
+function authHeaders(){ return S.token ? { 'Authorization':'Bearer '+S.token, 'Content-Type':'application/json' } : { 'Content-Type':'application/json' }; }
+async function api(method, url, body){
+  const r = await fetch(url, { method, headers: authHeaders(), body: body!==undefined?JSON.stringify(body):undefined });
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error || 'Error de red');
+  return data;
+}
+
+let ws = null, wsRetry = null;
+function connectWS(){
+  if(!S.token) return;
+  if(ws){ try{ws.close();}catch(e){} }
+  const proto = location.protocol==='https:'?'wss':'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(S.token)}`);
+  ws.onopen = () => { S.connected = true; };
+  ws.onmessage = ev => {
+    try{
+      const msg = JSON.parse(ev.data);
+      if(msg.type==='state'){
+        Object.assign(S, {
+          users: msg.data.users, fixtures: msg.data.fixtures,
+          myPreds: msg.data.myPreds, otherPreds: msg.data.otherPreds,
+          live: msg.data.live, settings: msg.data.settings,
+        });
+        render();
+      }
+    }catch(e){}
+  };
+  ws.onclose = ev => {
+    S.connected = false;
+    if(ev.code===4001){ logoutLocal(); render(); return; }
+    clearTimeout(wsRetry); wsRetry = setTimeout(connectWS, 3000);
+  };
+}
+function logoutLocal(){
+  S.token=''; S.name=''; S.isAdmin=false;
+  localStorage.removeItem('lpc_token'); localStorage.removeItem('lpc_name'); localStorage.removeItem('lpc_admin');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scoring (client copy — leaderboard, results coloring)
+// 5 exacto, 3 resultado, 0 malo. -1 olvido. +1 ganador de la fecha.
+// ─────────────────────────────────────────────────────────────
+const outcome = (h,a) => h>a?'H':a>h?'A':'D';
+function gamePoints(pred, fx){
+  if(fx.status!=='finished' || fx.home_score==null) return null;
+  if(!pred || pred.hs==null || pred.as==null) return null;
+  if(pred.hs===fx.home_score && pred.as===fx.away_score) return 5;
+  return outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score) ? 3 : 0;
+}
+function fxStarted(fx){ return fx.kickoff && new Date(fx.kickoff).getTime() <= Date.now(); }
+
+function predsForUser(name){
+  if(name===S.name) return S.myPreds;
+  return S.otherPreds[name] || {};
+}
+
+// Complete rounds: every fixture in the round finished
+function completedRounds(){
+  const byRound = {};
+  for(const f of S.fixtures){ if(f.round!=null){ (byRound[f.round]||(byRound[f.round]=[])).push(f); } }
+  return Object.keys(byRound).map(Number)
+    .filter(r => byRound[r].length>0 && byRound[r].every(f=>f.status==='finished'))
+    .sort((a,b)=>a-b);
+}
+
+// Full leaderboard computation
+function computeLeaderboard(){
+  const comp = completedRounds();
+  const rows = S.users.map(u => {
+    const preds = predsForUser(u.name);
+    const joined = new Date(u.createdAt).getTime();
+    let earned = 0, exact = 0, correct = 0, missed = 0;
+    const roundPts = {}; // round -> pts
+    for(const fx of S.fixtures){
+      const p = preds[fx.id];
+      const pts = gamePoints(p, fx);
+      if(pts!=null){
+        earned += pts;
+        if(pts===5) exact++;
+        if(pts>=3) correct++;
+      }
+      const miss = fxStarted(fx) && (!p || p.hs==null)
+        && fx.kickoff && new Date(fx.kickoff).getTime() > joined
+        && fx.status!=='postponed';
+      if(miss){ earned -= 1; missed++; }
+      if(fx.round!=null && comp.includes(fx.round)){
+        roundPts[fx.round] = (roundPts[fx.round]||0) + (pts!=null?pts:0) - (miss?1:0);
+      }
+    }
+    return { name:u.name, baseline:u.baseline||0, earned, exact, correct, missed, roundPts, fechas:0 };
+  });
+  // Ganador de la fecha: +1 per complete round to max scorer(s)
+  const fechaWinners = {}; // round -> [names]
+  for(const r of comp){
+    let max = -Infinity;
+    for(const row of rows){ const s = row.roundPts[r]; if(s!=null && s>max) max = s; }
+    if(max===-Infinity) continue;
+    fechaWinners[r] = [];
+    for(const row of rows){
+      if(row.roundPts[r]===max){ row.fechas++; fechaWinners[r].push(row.name); }
+    }
+  }
+  for(const row of rows) row.total = row.baseline + row.earned + row.fechas;
+  // Tiebreakers: Total → Exactos → Resultados
+  rows.sort((a,b) => b.total-a.total || b.exact-a.exact || b.correct-a.correct || a.name.localeCompare(b.name));
+  // Shared ranks
+  let rank=0, prev=null;
+  rows.forEach((row,i) => {
+    const key = `${row.total}|${row.exact}|${row.correct}`;
+    if(key!==prev){ rank = i+1; prev = key; }
+    row.rank = rank;
+  });
+  return { rows, fechaWinners, completed: comp };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Rendering
+// ─────────────────────────────────────────────────────────────
+function render(){
+  const app = $('#app');
+  if(!S.token){ app.innerHTML = renderAuth(); bindAuth(); return; }
+  const tabs = [
+    ['predict','🎯 Predicciones'], ['results','📊 Resultados'], ['leaderboard','🏆 Tabla'],
+    ...(S.isAdmin?[['admin','⚙️ Admin']]:[]),
+  ];
+  app.innerHTML = `
+    <header class="hdr"><div class="hdr-in">
+      <span class="brand"><span class="star">★</span> La Polla Chilena</span>
+      <nav class="tabs">${tabs.map(([k,l])=>`<button class="tab ${S.tab===k?'on':''}" data-tab="${k}">${l}</button>`).join('')}</nav>
+      <div class="hdr-user"><span>${esc(S.name)}</span><button class="btn small" id="logoutBtn">Salir</button></div>
+    </div></header>
+    <main class="wrap">${
+      S.tab==='predict' ? renderPredict()
+      : S.tab==='results' ? renderResults()
+      : S.tab==='leaderboard' ? renderLeaderboard()
+      : renderAdmin()
+    }</main>`;
+  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ S.tab=b.dataset.tab; render(); });
+  $('#logoutBtn').onclick = async () => { try{ await api('POST','/api/logout'); }catch(e){} logoutLocal(); render(); };
+  if(S.tab==='predict') bindPredict();
+  if(S.tab==='results') bindResults();
+  if(S.tab==='admin') bindAdmin();
+}
+
+// ── Auth views ───────────────────────────────────────────────
+function renderAuth(){
+  const v = S.authView;
+  let body='';
+  if(v==='showRecovery'){
+    body = `
+      <p class="muted" style="font-size:0.9rem;">Tu cuenta fue creada. Guarda este <b>código de recuperación</b> — es la única forma de recuperar tu cuenta si olvidas la contraseña:</p>
+      <div class="recovery-code">${esc(S.recoveryCode)}</div>
+      <p class="faint" style="font-size:0.78rem;">Anótalo o tómale captura. No se volverá a mostrar.</p>
+      <button class="btn primary" id="recoveryDone">Ya lo guardé — entrar</button>`;
+  } else if(v==='register'){
+    body = `
+      <input id="aName" placeholder="Tu nombre" maxlength="30" autocomplete="username">
+      <input id="aPass" type="password" placeholder="Contraseña (mínimo 4)" autocomplete="new-password">
+      <input id="aPass2" type="password" placeholder="Repite la contraseña" autocomplete="new-password">
+      ${S.authErr?`<div class="err">${esc(S.authErr)}</div>`:''}
+      <button class="btn primary" id="aSubmit">Crear cuenta</button>
+      <div class="auth-links"><a data-v="login">Ya tengo cuenta</a></div>`;
+  } else if(v==='forgot'){
+    body = `
+      <input id="aName" placeholder="Tu nombre" autocomplete="username">
+      <input id="aCode" placeholder="Código de recuperación (XXXX-XXXX-XXXX)" style="text-transform:uppercase;">
+      <input id="aPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
+      ${S.authErr?`<div class="err">${esc(S.authErr)}</div>`:''}
+      <button class="btn primary" id="aSubmit">Restablecer contraseña</button>
+      <div class="auth-links"><a data-v="login">Volver</a></div>`;
+  } else {
+    body = `
+      <input id="aName" placeholder="Tu nombre" autocomplete="username">
+      <input id="aPass" type="password" placeholder="Contraseña" autocomplete="current-password">
+      ${S.authErr?`<div class="err">${esc(S.authErr)}</div>`:''}
+      <button class="btn primary" id="aSubmit">Entrar</button>
+      <div class="auth-links"><a data-v="register">Crear cuenta</a><a data-v="forgot">Olvidé mi contraseña</a></div>`;
+  }
+  return `<div class="auth-ov"><div class="auth-box">
+    <span class="brand"><span class="star">★</span> La Polla Chilena</span>
+    <div class="auth-sub">Primera División · pronósticos entre amigos</div>
+    <div class="card">${body}</div>
+  </div></div>`;
+}
+function bindAuth(){
+  document.querySelectorAll('.auth-links a').forEach(a=>a.onclick=()=>{ S.authView=a.dataset.v; S.authErr=''; render(); });
+  const done = $('#recoveryDone');
+  if(done){ done.onclick = () => { S.authView='login'; S.recoveryCode=''; connectWS(); render(); }; return; }
+  const submit = $('#aSubmit');
+  if(!submit) return;
+  const go = async () => {
+    S.authErr='';
+    const name = $('#aName')?.value, pass = $('#aPass')?.value;
+    try{
+      if(S.authView==='register'){
+        if(pass !== $('#aPass2')?.value) throw new Error('Las contraseñas no coinciden');
+        const r = await api('POST','/api/register',{ name, password: pass });
+        saveSession(r); S.recoveryCode = r.recoveryCode; S.authView='showRecovery'; render();
+      } else if(S.authView==='forgot'){
+        const r = await api('POST','/api/reset-password',{ name, recoveryCode: $('#aCode')?.value, newPassword: pass });
+        saveSession(r); S.recoveryCode = r.recoveryCode; S.authView='showRecovery'; render();
+        toast('Contraseña actualizada — guarda tu nuevo código');
+      } else {
+        const r = await api('POST','/api/login',{ name, password: pass });
+        saveSession(r); connectWS(); render();
+      }
+    }catch(e){ S.authErr = e.message; render(); }
+  };
+  submit.onclick = go;
+  document.querySelectorAll('.auth-box input').forEach(i=>i.onkeydown=e=>{ if(e.key==='Enter') go(); });
+}
+function saveSession(r){
+  S.token=r.token; S.name=r.name; S.isAdmin=!!r.isAdmin;
+  localStorage.setItem('lpc_token', r.token);
+  localStorage.setItem('lpc_name', r.name);
+  localStorage.setItem('lpc_admin', r.isAdmin?'1':'0');
+}
+
+// ── Shared helpers ───────────────────────────────────────────
+function roundsList(){
+  const rs = [...new Set(S.fixtures.filter(f=>f.round!=null).map(f=>f.round))].sort((a,b)=>a-b);
+  return rs;
+}
+function currentRoundDefault(){
+  // First round with an unstarted game, else last round
+  const rs = roundsList();
+  for(const r of rs){
+    if(S.fixtures.some(f=>f.round===r && !fxStarted(f))) return r;
+  }
+  return rs[rs.length-1] ?? null;
+}
+function fmtWhen(iso){
+  if(!iso) return 'por definir';
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-CL',{weekday:'short',day:'numeric',month:'short'})
+    + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+}
+function chipsHtml(sel, extraClassFn){
+  const rs = roundsList();
+  if(!rs.length) return '';
+  return `<div class="chips">${rs.map(r=>{
+    const cls = ['chip', r===sel?'on':'', extraClassFn?extraClassFn(r):''].join(' ');
+    return `<button class="${cls}" data-round="${r}">F${r}</button>`;
+  }).join('')}</div>`;
+}
+
+// ── Predict tab ──────────────────────────────────────────────
+function renderPredict(){
+  if(!S.fixtures.length){
+    return `<div class="card"><p class="muted">Aún no hay partidos cargados.${S.isAdmin?' Anda al Admin y sincroniza el fixture.':' El admin todavía no carga el fixture.'}</p></div>`;
+  }
+  if(S.round==null) S.round = currentRoundDefault();
+  const fxs = S.fixtures.filter(f=>f.round===S.round)
+    .sort((a,b)=>new Date(a.kickoff||0)-new Date(b.kickoff||0));
+  const doneCls = r => S.fixtures.filter(f=>f.round===r).every(f=>f.status==='finished') ? 'done' : '';
+  const rows = fxs.map(fx=>{
+    const locked = fxStarted(fx) || fx.status==='finished';
+    const p = S.myPreds[fx.id] || {};
+    const save = S.saveState[fx.id];
+    const postponed = fx.status==='postponed';
+    return `<div class="fx ${locked?'locked':''}">
+      <span class="when">${postponed?'⏸ suspendido':fmtWhen(fx.kickoff)}</span>
+      <div class="teams">
+        <span class="team h">${esc(fx.home)}</span>
+        ${locked
+          ? `<span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--text-mut);">${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span>`
+          : `<input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="h" value="${p.hs??''}">
+             <span class="faint">–</span>
+             <input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="a" value="${p.as??''}">`}
+        <span class="team a">${esc(fx.away)}</span>
+      </div>
+      ${locked ? `<span class="lock">🔒</span>`
+        : save==='saved' ? `<span class="saved-dot">✓ guardado</span>`
+        : save==='saving' ? `<span class="faint" style="font-size:0.75rem;">…</span>` : ''}
+    </div>`;
+  }).join('');
+  return `
+    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Fecha ${S.round}</h2>
+    <p class="faint" style="font-size:0.82rem;margin-bottom:0.75rem;">
+      Puedes predecir cada partido hasta que comience. Si se te olvida uno: <b style="color:var(--mal);">−1 punto</b>.
+    </p>
+    ${chipsHtml(S.round, doneCls)}
+    ${rows || '<div class="card muted">No hay partidos en esta fecha.</div>'}`;
+}
+const _saveTimers = {};
+function bindPredict(){
+  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ S.round=parseInt(c.dataset.round,10); render(); });
+  document.querySelectorAll('.fx input[data-fx]').forEach(inp=>{
+    inp.oninput = () => {
+      const fid = inp.dataset.fx;
+      clearTimeout(_saveTimers[fid]);
+      S.saveState[fid]='saving';
+      _saveTimers[fid] = setTimeout(async () => {
+        const h = document.querySelector(`input[data-fx="${fid}"][data-side="h"]`)?.value;
+        const a = document.querySelector(`input[data-fx="${fid}"][data-side="a"]`)?.value;
+        // Update local state so re-render keeps values
+        S.myPreds[fid] = { hs: h===''?null:parseInt(h,10), as: a===''?null:parseInt(a,10) };
+        try{
+          await api('PUT', `/api/predictions/${encodeURIComponent(fid)}`, { homeScore:h, awayScore:a });
+          S.saveState[fid]='saved';
+        }catch(e){ toast(e.message); delete S.saveState[fid]; }
+        // Refresh just the save indicator without nuking focus: full render only if not typing
+        if(document.activeElement?.dataset?.fx !== fid) render();
+      }, 600);
+    };
+  });
+}
+
+// ── Results tab ──────────────────────────────────────────────
+function renderResults(){
+  if(!S.fixtures.length) return `<div class="card muted">Aún no hay partidos cargados.</div>`;
+  if(S.resRound==null) S.resRound = currentRoundDefault();
+  const users = [...S.users].sort((a,b)=>a.name.localeCompare(b.name));
+  const fxs = S.fixtures.filter(f=>f.round===S.resRound)
+    .sort((a,b)=>new Date(a.kickoff||0)-new Date(b.kickoff||0));
+
+  const head = `<tr><th>Partido</th>${users.map(u=>`<th>${esc(u.name)}</th>`).join('')}</tr>`;
+  const body = fxs.map(fx=>{
+    const live = S.live[fx.id];
+    let score;
+    if(live) score = `<span class="livepill">${live.hs}–${live.as} <span class="dot">●</span> ${esc(live.clock||'EN VIVO')}</span>`;
+    else if(fx.status==='finished') score = `<b style="color:var(--cobre);">${fx.home_score}–${fx.away_score}</b> <span class="faint" style="font-size:0.68rem;">FT</span>`;
+    else if(fx.status==='postponed') score = `<span class="faint">suspendido</span>`;
+    else score = `<span class="faint" style="font-size:0.75rem;">${fmtWhen(fx.kickoff)}</span>`;
+    const compare = fx.status==='finished' && fx.home_score!=null
+      ? { home_score: fx.home_score, away_score: fx.away_score, status:'finished' }
+      : live ? { home_score: live.hs, away_score: live.as, status:'finished' } : null;
+    const cells = users.map(u=>{
+      const p = predsForUser(u.name)[fx.id];
+      const started = fxStarted(fx);
+      if(!started) return `<td class="pick p-wait">${u.name===S.name && p && p.hs!=null ? `${p.hs}–${p.as}` : '·'}</td>`;
+      if(!p || p.hs==null){
+        return fx.status==='postponed'
+          ? `<td class="pick p-wait">–</td>`
+          : `<td class="pick p-miss">−1</td>`;
+      }
+      if(!compare) return `<td class="pick p-wait">${p.hs}–${p.as}</td>`;
+      const pts = gamePoints(p, compare);
+      const cls = pts===5?'p-exact':pts===3?'p-good':'p-bad';
+      return `<td class="pick ${cls}">${pts===5?'🎯 ':''}${p.hs}–${p.as}</td>`;
+    }).join('');
+    return `<tr><td>${esc(fx.home)} <span class="faint">v</span> ${esc(fx.away)}<br>${score}</td>${cells}</tr>`;
+  }).join('');
+
+  return `
+    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Resultados — Fecha ${S.resRound}</h2>
+    ${chipsHtml(S.resRound)}
+    <div class="res-scroll"><table class="res">${head}${body}</table></div>
+    <p class="faint" style="font-size:0.75rem;margin-top:0.6rem;">
+      🎯 verde = marcador exacto (5 pts) · verde = resultado correcto (3 pts) ·
+      <span style="color:var(--mal);">rojo</span> = resultado equivocado ·
+      <i>−1</i> = no predijo · Los pronósticos de los demás se muestran cuando el partido comienza.
+    </p>`;
+}
+function bindResults(){
+  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ S.resRound=parseInt(c.dataset.round,10); render(); });
+}
+
+// ── Leaderboard tab ──────────────────────────────────────────
+function renderLeaderboard(){
+  if(!S.users.length) return `<div class="card muted">Sin usuarios aún.</div>`;
+  const { rows, fechaWinners, completed } = computeLeaderboard();
+  const strip = completed.length ? `
+    <div class="fecha-strip">${completed.map(r=>`
+      <div class="fecha-win">🏆 <b>F${r}</b> ${fechaWinners[r].map(esc).join(', ')}</div>`).join('')}
+    </div>` : '';
+  const body = rows.map(e=>{
+    const medal = e.rank===1?'🥇':e.rank===2?'🥈':e.rank===3?'🥉':e.rank;
+    return `<tr>
+      <td class="rank">${medal}</td>
+      <td style="font-weight:600;">${esc(e.name)}${e.baseline?` <span class="faint" title="Comenzó con ${e.baseline} pts (regla del que llega tarde)" style="font-size:0.7rem;">+${e.baseline}</span>`:''}</td>
+      <td class="total">${e.total}</td>
+      <td style="color:var(--verde);">${e.exact}</td>
+      <td class="muted">${e.correct}</td>
+      <td style="color:${e.missed?'var(--mal)':'var(--text-faint)'};">${e.missed||'–'}</td>
+      <td class="trofeos">${e.fechas ? '🏆'.repeat(Math.min(e.fechas,8)) + (e.fechas>8?` ×${e.fechas}`:'') : '–'}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Tabla general</h2>
+    ${strip}
+    <div class="card" style="padding:0;overflow-x:auto;">
+      <table class="lb">
+        <tr><th>#</th><th>Nombre</th><th title="Puntos totales (incluye bonos de fecha y −1 por olvidos)">Total</th>
+          <th title="Marcadores exactos — primer desempate">Exactos</th>
+          <th title="Resultados correctos (incluye exactos) — segundo desempate">Result.</th>
+          <th title="Partidos sin pronóstico (−1 c/u)">Olvidos</th>
+          <th title="Fechas ganadas (+1 punto cada una, puede haber empates)">Fechas</th></tr>
+        ${body}
+      </table>
+    </div>
+    <p class="faint" style="font-size:0.75rem;margin-top:0.6rem;">
+      5 pts marcador exacto · 3 pts resultado correcto · −1 por partido sin pronóstico ·
+      +1 al ganador de cada fecha (empates comparten el punto) ·
+      Desempates: Total → Exactos → Resultados.
+    </p>`;
+}
+
+// ── Admin tab ────────────────────────────────────────────────
+function renderAdmin(){
+  const st = S.settings;
+  const fxOptions = [...S.fixtures]
+    .sort((a,b)=>new Date(a.kickoff||0)-new Date(b.kickoff||0))
+    .map(f=>`<option value="${f.id}">F${f.round??'?'} · ${esc(f.home)} v ${esc(f.away)} (${f.status==='finished'?`${f.home_score}–${f.away_score}`:fmtWhen(f.kickoff)})</option>`).join('');
+  return `
+    <h2 style="margin-bottom:0.75rem;font-size:1.05rem;">Administración</h2>
+
+    <details class="card admin-sec" open>
+      <summary>🔄 Sincronización (fixture + resultados + en vivo)</summary>
+      <div class="admin-body">
+        <div class="row">
+          <label class="muted" style="font-size:0.85rem;">TheSportsDB league ID <input id="setLeague" value="${esc(st.tsdb_league_id||'')}" style="width:6rem;"></label>
+          <label class="muted" style="font-size:0.85rem;">Temporada <input id="setSeason" value="${esc(st.tsdb_season||'')}" style="width:6rem;"></label>
+          <label class="muted" style="font-size:0.85rem;">ESPN slug <input id="setEspn" value="${esc(st.espn_slug||'')}" style="width:6rem;"></label>
+          <label class="muted" style="font-size:0.85rem;"><input type="checkbox" id="setSyncOn" ${st.sync_enabled==='true'?'checked':''}> Sync automático</label>
+        </div>
+        <div class="row">
+          <button class="btn" id="saveSettings">Guardar configuración</button>
+          <button class="btn primary" id="syncNow">Sincronizar fixture ahora</button>
+          <span class="faint" style="font-size:0.78rem;">Última sync: ${st.last_sync?new Date(st.last_sync).toLocaleString('es-CL'):'nunca'}</span>
+        </div>
+        <p class="faint" style="font-size:0.76rem;">Fixture y resultados finales: TheSportsDB (gratis). Marcadores en vivo: ESPN. Si alguna API falla, puedes cargar/editar todo a mano abajo.</p>
+      </div>
+    </details>
+
+    <details class="card admin-sec">
+      <summary>➕ Agregar partido manual</summary>
+      <div class="admin-body"><div class="row">
+        <input id="addRound" type="number" placeholder="Fecha #" style="width:5.5rem;">
+        <input id="addKick" type="datetime-local" style="width:13rem;">
+        <input id="addHome" placeholder="Local" style="width:11rem;">
+        <input id="addAway" placeholder="Visita" style="width:11rem;">
+        <button class="btn primary" id="addFx">Agregar</button>
+      </div></div>
+    </details>
+
+    <details class="card admin-sec">
+      <summary>✏️ Editar partido / cargar resultado</summary>
+      <div class="admin-body">
+        <select id="edSel" style="max-width:100%;">${fxOptions||'<option>No hay partidos</option>'}</select>
+        <div class="row">
+          <input id="edRound" type="number" placeholder="Fecha #" style="width:5.5rem;">
+          <input id="edKick" type="datetime-local" style="width:13rem;">
+          <select id="edStatus" style="width:9rem;">
+            <option value="scheduled">Programado</option>
+            <option value="postponed">Suspendido</option>
+          </select>
+          <button class="btn" id="edSave">Guardar cambios</button>
+        </div>
+        <div class="row">
+          <span class="muted" style="font-size:0.85rem;">Resultado:</span>
+          <input id="edHS" type="number" min="0" placeholder="L" style="width:3.4rem;">
+          <span>–</span>
+          <input id="edAS" type="number" min="0" placeholder="V" style="width:3.4rem;">
+          <button class="btn primary" id="edResult">Guardar resultado</button>
+          <button class="btn" id="edClear">Borrar resultado</button>
+          <button class="btn" id="edDelete" style="border-color:var(--mal);color:var(--mal);">Eliminar partido</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="card admin-sec">
+      <summary>👥 Usuarios</summary>
+      <div class="admin-body">
+        ${S.users.map(u=>`
+          <div class="row" style="justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
+            <span>${esc(u.name)} ${u.isAdmin?'<span class="faint">(admin)</span>':''} ${u.baseline?`<span class="faint" style="font-size:0.75rem;">base +${u.baseline}</span>`:''}</span>
+            <span class="row">
+              <button class="btn small resetUser" data-name="${esc(u.name)}">Nuevo código recuperación</button>
+              ${u.name!==S.name?`<button class="btn small delUser" data-name="${esc(u.name)}" style="border-color:var(--mal);color:var(--mal);">Eliminar</button>`:''}
+            </span>
+          </div>`).join('')}
+        <p class="faint" style="font-size:0.76rem;">“Nuevo código” genera un código de recuperación para que el usuario restablezca su contraseña desde “Olvidé mi contraseña”.</p>
+      </div>
+    </details>`;
+}
+function bindAdmin(){
+  $('#saveSettings').onclick = async () => {
+    try{
+      await api('PUT','/api/admin/settings',{
+        tsdb_league_id: $('#setLeague').value.trim(),
+        tsdb_season: $('#setSeason').value.trim(),
+        espn_slug: $('#setEspn').value.trim(),
+        sync_enabled: $('#setSyncOn').checked ? 'true':'false',
+      });
+      toast('Configuración guardada');
+    }catch(e){ toast(e.message); }
+  };
+  $('#syncNow').onclick = async () => {
+    $('#syncNow').disabled = true;
+    try{
+      const r = await api('POST','/api/admin/sync');
+      toast(r.ok ? `Sync OK — ${r.count} partidos` : `Sync falló: ${r.error}`);
+    }catch(e){ toast(e.message); }
+    $('#syncNow').disabled = false;
+  };
+  $('#addFx').onclick = async () => {
+    try{
+      await api('POST','/api/admin/fixtures',{
+        round: $('#addRound').value || null,
+        kickoff: $('#addKick').value,
+        home: $('#addHome').value, away: $('#addAway').value,
+      });
+      toast('Partido agregado');
+    }catch(e){ toast(e.message); }
+  };
+  const edSel = $('#edSel');
+  const fillEd = () => {
+    const fx = S.fixtures.find(f=>f.id===edSel.value);
+    if(!fx) return;
+    $('#edRound').value = fx.round ?? '';
+    $('#edKick').value = fx.kickoff ? new Date(new Date(fx.kickoff).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
+    $('#edStatus').value = fx.status==='postponed'?'postponed':'scheduled';
+    $('#edHS').value = fx.home_score ?? '';
+    $('#edAS').value = fx.away_score ?? '';
+  };
+  if(edSel && S.fixtures.length){ fillEd(); edSel.onchange = fillEd; }
+  $('#edSave').onclick = async () => {
+    try{
+      await api('PUT',`/api/admin/fixtures/${encodeURIComponent(edSel.value)}`,{
+        round: $('#edRound').value, kickoff: $('#edKick').value || undefined,
+        status: $('#edStatus').value,
+      });
+      toast('Partido actualizado');
+    }catch(e){ toast(e.message); }
+  };
+  $('#edResult').onclick = async () => {
+    try{
+      await api('PUT',`/api/admin/results/${encodeURIComponent(edSel.value)}`,{
+        homeScore: $('#edHS').value, awayScore: $('#edAS').value,
+      });
+      toast('Resultado guardado');
+    }catch(e){ toast(e.message); }
+  };
+  $('#edClear').onclick = async () => {
+    try{ await api('PUT',`/api/admin/results/${encodeURIComponent(edSel.value)}`,{}); toast('Resultado borrado'); }
+    catch(e){ toast(e.message); }
+  };
+  $('#edDelete').onclick = async () => {
+    if(!confirm('¿Eliminar este partido y todos sus pronósticos?')) return;
+    try{ await api('DELETE',`/api/admin/fixtures/${encodeURIComponent(edSel.value)}`); toast('Partido eliminado'); }
+    catch(e){ toast(e.message); }
+  };
+  document.querySelectorAll('.resetUser').forEach(b=>b.onclick=async()=>{
+    try{
+      const r = await api('POST',`/api/admin/reset-user/${encodeURIComponent(b.dataset.name)}`);
+      prompt(`Código de recuperación para ${r.name} (cópialo y envíaselo):`, r.recoveryCode);
+    }catch(e){ toast(e.message); }
+  });
+  document.querySelectorAll('.delUser').forEach(b=>b.onclick=async()=>{
+    if(!confirm(`¿Eliminar a ${b.dataset.name} y todos sus pronósticos?`)) return;
+    try{ await api('DELETE',`/api/admin/users/${encodeURIComponent(b.dataset.name)}`); toast('Usuario eliminado'); }
+    catch(e){ toast(e.message); }
+  });
+}
+
+// ── Kickoff lock timer: re-render when a game crosses kickoff ─
+setInterval(() => {
+  if(!S.token || !S.fixtures.length) return;
+  const now = Date.now();
+  const crossing = S.fixtures.some(f => {
+    if(!f.kickoff) return false;
+    const k = new Date(f.kickoff).getTime();
+    return k <= now && k > now - 31*1000;
+  });
+  if(crossing) render();
+}, 30*1000);
+
+// ── Boot ─────────────────────────────────────────────────────
+if(S.token) connectWS();
+render();
+</script>
+</body>
+</html>
