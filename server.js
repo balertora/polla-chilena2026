@@ -351,6 +351,29 @@ app.post('/api/admin/sync', requireAuth, requireAdmin, async (req, res) => {
   res.json(result);
 });
 
+// Debug: show what the API returns + what's stored (admin only)
+app.get('/api/admin/debug', requireAuth, requireAdmin, async (req, res) => {
+  try{
+    const leagueId = await getSetting('tsdb_league_id');
+    const season = await getSetting('tsdb_season');
+    const url = `https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id=${leagueId}&s=${encodeURIComponent(season)}`;
+    let apiSample = null, apiErr = null, apiCount = 0;
+    try{
+      const data = await fetchJson(url);
+      const events = data?.events || [];
+      apiCount = events.length;
+      apiSample = events.slice(0,3).map(ev => ({
+        idEvent: ev.idEvent, round: ev.intRound, timestamp: ev.strTimestamp,
+        date: ev.dateEvent, time: ev.strTime, home: ev.strHomeTeam, away: ev.strAwayTeam,
+        hs: ev.intHomeScore, as: ev.intAwayScore,
+      }));
+    }catch(e){ apiErr = e.message; }
+    const stored = await dbAll(`SELECT id, round, kickoff, home, away, home_score, away_score, status FROM fixtures ORDER BY kickoff LIMIT 5`);
+    const storedCount = await dbGet(`SELECT COUNT(*) AS c FROM fixtures`);
+    res.json({ url, apiCount, apiErr, apiSample, storedCount: storedCount.c, storedSample: stored });
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
 // ── Fixture sync: TheSportsDB (free key '123') ───────────────
 async function fetchJson(url){
   const r = await fetch(url, { headers: { 'User-Agent': 'polla-chilena/1.0' } });
