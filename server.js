@@ -321,74 +321,17 @@ app.delete('/api/admin/fixtures/:id', requireAuth, requireAdmin, async (req, res
   res.json({ok:true});
 });
 
-// Admin: reset a user's password -> returns fresh recovery code for them
-app.post('/api/admin/reset-user/:name', requireAuth, requireAdmin, async (req, res) => {
-  try{
-    const u = await dbGet(`SELECT * FROM users WHERE lower(name)=lower(?)`,[req.params.name]);
-    if(!u) return res.status(404).json({error:'Usuario no encontrado'});
-    const recovery = newRecoveryCode();
-    await dbRun(`UPDATE users SET recovery_hash=? WHERE id=?`,[hashRecovery(recovery), u.id]);
-    res.json({ok:true, name:u.name, recoveryCode:recovery});
-  }catch(e){ console.error(e); res.status(500).json({error:'Error del servidor'}); }
-});
-
-app.delete('/api/admin/users/:name', requireAuth, requireAdmin, async (req, res) => {
-  const u = await dbGet(`SELECT * FROM users WHERE lower(name)=lower(?)`,[req.params.name]);
-  if(!u) return res.status(404).json({error:'Usuario no encontrado'});
-  if(u.id===req.user.id) return res.status(400).json({error:'No puedes eliminarte a ti mismo'});
-  await dbRun(`DELETE FROM users WHERE id=?`,[u.id]);
-  await dbRun(`DELETE FROM predictions WHERE user_id=?`,[u.id]);
-  await dbRun(`DELETE FROM sessions WHERE user_id=?`,[u.id]);
-  scheduleBroadcast();
-  res.json({ok:true});
-});
-
-app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
-  const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled','polla_start'];
-  for(const [k,v] of Object.entries(req.body||{})){
-    if(allowed.includes(k)) await setSetting(k, v);
-  }
-  scheduleBroadcast();
-  res.json({ok:true});
-});
-
-// Bulk import fixtures from pasted text. One game per line:
-//   round | YYYY-MM-DD HH:MM | Home | Away
-// Time is local Chile time (America/Santiago). Missing time -> 15:00.
-app.post('/api/admin/bulk-fixtures', requireAuth, requireAdmin, async (req, res) => {
+// Import TheSportsDB CSV export. Columns (with header):
+//   idEvent, strTimestamp (UTC), Round ("Round N"), Home Team, Home Score, Away Team, Away Score, ...
+// strTimestamp is UTC. Empty scores = not played yet. Re-import updates existing
+// (matched by idEvent) but never overwrites an admin-entered result.
+app.post('/api/admin/import-csv', requireAuth, requireAdmin, async (req, res) => {
   try{
     const { text } = req.body || {};
-    if(!text || !String(text).trim()) return res.status(400).json({error:'Texto vacío'});
-    const lines = String(text).split('\n').map(l=>l.trim()).filter(Boolean);
-    let added=0, errors=[];
-    for(const [i,line] of lines.entries()){
-      const parts = line.split('|').map(s=>s.trim());
-      if(parts.length < 4){ errors.push(`Línea ${i+1}: faltan campos`); continue; }
-      const [roundStr, dtStr, home, away] = parts;
-      const round = roundStr!=='' ? parseInt(roundStr,10) : null;
-      // Parse "YYYY-MM-DD HH:MM" as Chile local time (UTC-3, no DST complexity for MVP -> store as -03:00)
-      let iso = null;
-      const m = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
-      if(m){
-        iso = `${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2,'0')}:${m[5]}:00-03:00`;
-        iso = new Date(iso).toISOString();
-      } else {
-        const md = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if(md){ iso = new Date(`${dtStr}T15:00:00-03:00`).toISOString(); }
-        else { errors.push(`Línea ${i+1}: fecha inválida "${dtStr}"`); continue; }
-      }
-      if(!home || !away){ errors.push(`Línea ${i+1}: faltan equipos`); continue; }
-      const id = 'bulk-' + crypto.createHash('md5').update(`${round}|${home}|${away}`).digest('hex').slice(0,10);
-      const existing = await dbGet(`SELECT id FROM fixtures WHERE id=?`,[id]);
-      if(existing){
-        await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?, updated_at=? WHERE id=?`,
-          [round, iso, home, away, new Date().toISOString(), id]);
-      } else {
-        await dbRun(`INSERT INTO fixtures (id, round, kickoff, home, away, status, updated_at) VALUES (?,?,?,?,?,'scheduled',?)`,
-          [id, round, iso, home, away, new Date().toISOString()]);
-      }
-      added++;
-    }
+    if(!text || !String(text).trim()) return res.status(400).json({error:'CSV vacío'});
+    const { rows, errors } = parseCsvText(text);
+    if(!rows.length) return res.status(400).json({error:'No se encontraron partidos en el CSV', errors});
+    const added = await upsertFixtureRows(rows);
     scheduleBroadcast();
     res.json({ ok:true, added, errors });
   }catch(e){ console.error(e); res.status(500).json({error:e.message}); }
@@ -400,76 +343,110 @@ app.post('/api/admin/sync', requireAuth, requireAdmin, async (req, res) => {
   res.json(result);
 });
 
-// Debug: show what the API returns + what's stored (admin only)
+// Debug: show what the CSV URL returns + what's stored (admin only)
 app.get('/api/admin/debug', requireAuth, requireAdmin, async (req, res) => {
   try{
     const leagueId = await getSetting('tsdb_league_id');
     const season = await getSetting('tsdb_season');
-    const url = `https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id=${leagueId}&s=${encodeURIComponent(season)}`;
-    let apiSample = null, apiErr = null, apiCount = 0;
+    const url = `https://www.thesportsdb.com/season/${leagueId}-chile-primera-division/${season}?csv=1&all=1`;
+    let csvCount=0, csvErr=null, sample=null;
     try{
-      const data = await fetchJson(url);
-      const events = data?.events || [];
-      apiCount = events.length;
-      apiSample = events.slice(0,3).map(ev => ({
-        idEvent: ev.idEvent, round: ev.intRound, timestamp: ev.strTimestamp,
-        date: ev.dateEvent, time: ev.strTime, home: ev.strHomeTeam, away: ev.strAwayTeam,
-        hs: ev.intHomeScore, as: ev.intAwayScore,
-      }));
-    }catch(e){ apiErr = e.message; }
-    const stored = await dbAll(`SELECT id, round, kickoff, home, away, home_score, away_score, status FROM fixtures ORDER BY kickoff LIMIT 5`);
+      const r = await fetch(url, { headers:{ 'User-Agent':'polla-chilena/1.0' } });
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const parsed = parseCsvText(await r.text());
+      csvCount = parsed.rows.length;
+      sample = parsed.rows.slice(0,3);
+    }catch(e){ csvErr = e.message; }
+    const stored = await dbAll(`SELECT id, round, kickoff, home, away, home_score, away_score, status, result_source FROM fixtures ORDER BY kickoff LIMIT 5`);
     const storedCount = await dbGet(`SELECT COUNT(*) AS c FROM fixtures`);
-    res.json({ url, apiCount, apiErr, apiSample, storedCount: storedCount.c, storedSample: stored });
+    res.json({ url, csvCount, csvErr, sample, storedCount: storedCount.c, storedSample: stored });
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
-// ── Fixture sync: TheSportsDB (free key '123') ───────────────
-async function fetchJson(url){
-  const r = await fetch(url, { headers: { 'User-Agent': 'polla-chilena/1.0' } });
-  if(!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-  return r.json();
+// Shared CSV parser (used by both URL sync and manual paste import)
+function fetchJson(url){
+  return fetch(url, { headers: { 'User-Agent':'polla-chilena/1.0' } }).then(r => {
+    if(!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+    return r.json();
+  });
+}
+function parseCsvText(text){
+  const parseCsvLine = (line) => {
+    const out=[]; let cur=''; let inQ=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c==='"'){ if(inQ && line[i+1]==='"'){ cur+='"'; i++; } else inQ=!inQ; }
+      else if(c===',' && !inQ){ out.push(cur); cur=''; }
+      else cur+=c;
+    }
+    out.push(cur); return out;
+  };
+  const lines = String(text).split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lines.length) return { rows:[], errors:['CSV vacío'] };
+  // Find header line (may have preamble text before it)
+  let headIdx = lines.findIndex(l => /idevent/i.test(l) && /strtimestamp/i.test(l));
+  if(headIdx<0) headIdx = 0;
+  const head = parseCsvLine(lines[headIdx]).map(h=>h.toLowerCase().trim());
+  const hasHeader = head.includes('idevent') || head.includes('strtimestamp');
+  const idx = { id:head.indexOf('idevent'), ts:head.indexOf('strtimestamp'), round:head.indexOf('round'),
+    home:head.indexOf('home team'), hs:head.indexOf('home score'), away:head.indexOf('away team'), as:head.indexOf('away score') };
+  const rows=[], errors=[];
+  for(let i=(hasHeader?headIdx+1:0);i<lines.length;i++){
+    const f = parseCsvLine(lines[i]);
+    if(f.length<4) continue; // skip stray lines
+    const get = (name, pos) => (hasHeader && idx[name]>=0 ? f[idx[name]] : f[pos]) ?? '';
+    const idEvent=String(get('id',0)).trim(), tsRaw=String(get('ts',1)).trim(), roundRaw=String(get('round',2)).trim();
+    const home=String(get('home',3)).trim(), hsRaw=String(get('hs',4)).trim(), away=String(get('away',5)).trim(), asRaw=String(get('as',6)).trim();
+    if(!home || !away){ continue; } // silently skip non-game lines
+    const rm = roundRaw.match(/(\d+)/); const round = rm?parseInt(rm[1],10):null;
+    const tm = tsRaw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if(!tm){ errors.push(`"${home} v ${away}": fecha inválida "${tsRaw}"`); continue; }
+    const iso = new Date(`${tm[1]}-${tm[2]}-${tm[3]}T${tm[4]}:${tm[5]}:00Z`).toISOString();
+    const hasScore = hsRaw!=='' && asRaw!=='';
+    const id = idEvent ? 'tsdb-'+idEvent : 'csv-'+crypto.createHash('md5').update(`${round}|${home}|${away}`).digest('hex').slice(0,10);
+    rows.push({ id, round, iso, home, away, hs:hasScore?parseInt(hsRaw,10):null, as:hasScore?parseInt(asRaw,10):null, finished:hasScore });
+  }
+  return { rows, errors };
 }
 
+async function upsertFixtureRows(rows){
+  let count=0;
+  for(const r of rows){
+    const existing = await dbGet(`SELECT * FROM fixtures WHERE id=?`,[r.id]);
+    const keepAdmin = existing?.result_source==='admin';
+    if(!existing){
+      await dbRun(`INSERT INTO fixtures (id, round, kickoff, home, away, home_score, away_score, status, result_source, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [r.id, r.round, r.iso, r.home, r.away, r.finished?r.hs:null, r.finished?r.as:null,
+         r.finished?'finished':'scheduled', r.finished?'csv':null, new Date().toISOString()]);
+    } else {
+      await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?, home_score=?, away_score=?, status=?, result_source=?, updated_at=? WHERE id=?`,
+        [ r.round, r.iso, r.home, r.away,
+          keepAdmin ? existing.home_score : (r.finished?r.hs:existing.home_score),
+          keepAdmin ? existing.away_score : (r.finished?r.as:existing.away_score),
+          keepAdmin ? existing.status : (r.finished?'finished':(existing.status==='postponed'?'postponed':'scheduled')),
+          keepAdmin ? 'admin' : (r.finished?'csv':existing.result_source),
+          new Date().toISOString(), r.id ]);
+    }
+    count++;
+  }
+  return count;
+}
+
+// Sync fixtures from the public TheSportsDB CSV export URL (full season, no API limit)
 async function syncFixtures(){
   try{
     const leagueId = await getSetting('tsdb_league_id');
     const season = await getSetting('tsdb_season');
-    const url = `https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id=${leagueId}&s=${encodeURIComponent(season)}`;
-    const data = await fetchJson(url);
-    const events = data?.events || [];
-    if(!events.length) return { ok:false, error:'La API no devolvió partidos — revisa league ID y temporada', count:0 };
-    let upserts = 0;
-    for(const ev of events){
-      const id = 'tsdb-' + ev.idEvent;
-      const kickoff = ev.strTimestamp ? new Date(ev.strTimestamp + (ev.strTimestamp.endsWith('Z')?'':'Z')).toISOString()
-                    : ev.dateEvent ? new Date(ev.dateEvent + 'T' + (ev.strTime||'17:00:00') + 'Z').toISOString() : null;
-      const round = ev.intRound!=null && ev.intRound!=='' ? parseInt(ev.intRound,10) : null;
-      const finished = ev.intHomeScore!=null && ev.intHomeScore!=='' && ev.intAwayScore!=null && ev.intAwayScore!=='';
-      const existing = await dbGet(`SELECT * FROM fixtures WHERE id=?`,[id]);
-      if(!existing){
-        await dbRun(`INSERT INTO fixtures (id, round, kickoff, home, away, home_score, away_score, status, result_source, updated_at)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)`,
-          [id, round, kickoff, ev.strHomeTeam, ev.strAwayTeam,
-           finished?parseInt(ev.intHomeScore,10):null, finished?parseInt(ev.intAwayScore,10):null,
-           finished?'finished':'scheduled', finished?'tsdb':null, new Date().toISOString()]);
-        upserts++;
-      } else {
-        // Update schedule info always; update result only if admin hasn't set it manually
-        const keepAdminResult = existing.result_source==='admin';
-        await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?,
-                       home_score=?, away_score=?, status=?, result_source=?, updated_at=?
-                     WHERE id=?`,
-          [ round, kickoff, ev.strHomeTeam, ev.strAwayTeam,
-            keepAdminResult ? existing.home_score : (finished?parseInt(ev.intHomeScore,10):existing.home_score),
-            keepAdminResult ? existing.away_score : (finished?parseInt(ev.intAwayScore,10):existing.away_score),
-            keepAdminResult ? existing.status : (finished?'finished':existing.status==='finished'?'finished':'scheduled'),
-            keepAdminResult ? 'admin' : (finished?'tsdb':existing.result_source),
-            new Date().toISOString(), id ]);
-        upserts++;
-      }
-    }
+    const url = `https://www.thesportsdb.com/season/${leagueId}-chile-primera-division/${season}?csv=1&all=1`;
+    const r = await fetch(url, { headers: { 'User-Agent':'polla-chilena/1.0' } });
+    if(!r.ok) return { ok:false, error:`HTTP ${r.status} al descargar el CSV`, count:0 };
+    const text = await r.text();
+    const { rows, errors } = parseCsvText(text);
+    if(!rows.length) return { ok:false, error:'El CSV no trajo partidos — revisa league ID y temporada', count:0 };
+    const count = await upsertFixtureRows(rows);
     await setSetting('last_sync', new Date().toISOString());
-    return { ok:true, count:upserts };
+    return { ok:true, count, errors };
   }catch(e){
     console.error('syncFixtures:', e.message);
     return { ok:false, error:e.message, count:0 };
@@ -479,16 +456,57 @@ async function syncFixtures(){
 // ── Live scores: ESPN public scoreboard ──────────────────────
 let _liveScores = {}; // fixtureId -> { hs, as, clock, state }
 
+// Normalize a team name: lowercase, strip accents, drop common football words + punctuation
 function normName(s){
   return String(s||'').toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // strip accents
-    .replace(/\b(club|deportes|deportivo|cd|cf|sc|fc|de|la|el|los|las|universidad|u\.)\b/g,'')
-    .replace(/[^a-z0-9]/g,'');
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[.\-']/g,' ')
+    .replace(/\b(club|deportes?|deportivo|cd|cf|sc|fc|de|del|la|el|los|las)\b/g,' ')
+    .replace(/\s+/g,' ').trim();
 }
-function namesMatch(a, b){
-  const na=normName(a), nb=normName(b);
-  if(!na||!nb) return false;
-  return na===nb || na.includes(nb) || nb.includes(na);
+// Distinctive keys for each of our 16 canonical teams (incl. ESPN's abbreviations).
+// The two "Concepción" clubs must stay distinct, so their keys are the full two-word forms.
+function teamKeys(name){
+  const n = normName(name);
+  const keys = new Set([n]);
+  const map = {
+    'audax italiano': ['audax'],
+    'colo colo': ['colo colo','colocolo'],
+    'coquimbo unido': ['coquimbo'],
+    'serena': ['serena'],
+    'limache': ['limache'],
+    'everton vina mar': ['everton'],
+    'o higgins': ['o higgins','ohiggins','higgins'],
+    'union calera': ['union calera','calera'],
+    'universidad catolica': ['universidad catolica','catolica'],
+    'universidad chile': ['universidad chile','u chile'],
+    'universidad concepcion': ['universidad concepcion','u concepcion'],
+    'concepcion': ['concepcion'], // "Deportes Concepción" -> normed to just "concepcion"
+  };
+  if(map[n]) map[n].forEach(k=>keys.add(k));
+  return [...keys];
+}
+// True if ESPN's name refers to our fixture team. Prefers exact key match; only
+// falls back to substring for keys long enough to be unambiguous (avoids
+// "concepcion" matching "universidad concepcion" and vice-versa).
+function namesMatch(ourName, espnName){
+  const en = normName(espnName);
+  if(!en) return false;
+  const keys = teamKeys(ourName);
+  for(const k of keys){ if(en===k) return true; }
+  for(const k of keys){
+    if(k.length>=6 && (en.includes(k) || k.includes(en))){
+      // Guard the Concepción ambiguity: never cross-match the two clubs
+      const ourIsUniConce = keys.includes('universidad concepcion');
+      const ourIsDepConce = normName(ourName)==='concepcion';
+      if((ourIsUniConce || ourIsDepConce)){
+        if(ourIsUniConce && !en.includes('universidad')) return false;
+        if(ourIsDepConce && en.includes('universidad')) return false;
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 async function pollLive(){

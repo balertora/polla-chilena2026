@@ -648,6 +648,18 @@ function renderAdmin(){
       </div>
     </details>
 
+    <details class="card admin-sec" open>
+      <summary>📋 Importar fixture desde TheSportsDB (CSV)</summary>
+      <div class="admin-body">
+        <p class="faint" style="font-size:0.82rem;">En TheSportsDB, abre la temporada, usa el botón de exportar/copiar CSV y pega todo aquí (con o sin encabezado). Trae las 30 fechas, horas (en UTC) y los resultados de los partidos ya jugados. Re-importar actualiza horarios y resultados sin duplicar; nunca sobrescribe un resultado que hayas puesto a mano.</p>
+        <textarea id="csvText" rows="6" placeholder='idEvent,strTimestamp,Round,Home Team,Home Score,Away Team,Away Score,...&#10;"2412916","2026-01-30 23:00:00","Round 1","Universidad de Chile","0","Audax Italiano","0",...' style="width:100%;font-family:ui-monospace,monospace;font-size:0.72rem;padding:0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:0.5rem;color:var(--text);"></textarea>
+        <div class="row">
+          <button class="btn primary" id="csvSubmit">Importar CSV</button>
+          <span class="faint" style="font-size:0.78rem;">Recomendado para cargar toda la temporada de una vez.</span>
+        </div>
+      </div>
+    </details>
+
     <details class="card admin-sec">
       <summary>🔄 Sincronización (fixture + resultados + en vivo)</summary>
       <div class="admin-body">
@@ -664,7 +676,7 @@ function renderAdmin(){
           <span class="faint" style="font-size:0.78rem;">Última sync: ${st.last_sync?new Date(st.last_sync).toLocaleString('es-CL'):'nunca'}</span>
         </div>
         <pre id="debugOut" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:0.5rem;padding:0.75rem;font-size:0.72rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word;color:var(--text-mut);"></pre>
-        <p class="faint" style="font-size:0.76rem;">La API gratis de TheSportsDB a veces solo trae las primeras fechas. Para el fixture completo usa la <b>carga masiva</b> de abajo.</p>
+        <p class="faint" style="font-size:0.76rem;">La sincronización ahora descarga el fixture completo (las 30 fechas) directo del CSV público de TheSportsDB, con horas oficiales y resultados. Corre sola cada 6 horas si "Sync automático" está activo. La importación manual de abajo queda como respaldo.</p>
       </div>
     </details>
 
@@ -746,6 +758,19 @@ function bindAdmin(){
   if($('#clearStart')) $('#clearStart').onclick = async () => {
     try{ await api('PUT','/api/admin/settings',{ polla_start: '' }); toast('Se incluye toda la temporada'); }
     catch(e){ toast(e.message); }
+  };
+  $('#csvSubmit').onclick = async () => {
+    const text = $('#csvText').value;
+    if(!text.trim()) return toast('Pega el CSV primero');
+    $('#csvSubmit').disabled = true;
+    try{
+      const r = await api('POST','/api/admin/import-csv',{ text });
+      let msg = `${r.added} partidos importados`;
+      if(r.errors?.length) msg += ` · ${r.errors.length} con error`;
+      toast(msg);
+      if(r.errors?.length) alert('Errores:\n'+r.errors.slice(0,20).join('\n'));
+    }catch(e){ toast(e.message); }
+    $('#csvSubmit').disabled = false;
   };
   $('#bulkSubmit').onclick = async () => {
     const text = $('#bulkText').value;
