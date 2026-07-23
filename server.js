@@ -349,17 +349,23 @@ app.get('/api/admin/debug', requireAuth, requireAdmin, async (req, res) => {
     const leagueId = await getSetting('tsdb_league_id');
     const season = await getSetting('tsdb_season');
     const url = `https://www.thesportsdb.com/season/${leagueId}-chile-primera-division/${season}?csv=1&all=1`;
-    let csvCount=0, csvErr=null, sample=null;
+    let csvCount=0, csvErr=null, sample=null, rawSnippet=null, contentType=null, rawLen=0;
     try{
       const r = await fetch(url, { headers:{ 'User-Agent':'polla-chilena/1.0' } });
+      contentType = r.headers.get('content-type');
       if(!r.ok) throw new Error(`HTTP ${r.status}`);
-      const parsed = parseCsvText(await r.text());
+      const raw = await r.text();
+      rawLen = raw.length;
+      // Snippet around the CSV header so we can see the real format
+      const m = raw.match(/idEvent\s*,\s*strTimestamp/i);
+      rawSnippet = m ? raw.slice(m.index, m.index+400) : raw.slice(0, 400);
+      const parsed = parseCsvText(raw);
       csvCount = parsed.rows.length;
       sample = parsed.rows.slice(0,3);
     }catch(e){ csvErr = e.message; }
     const stored = await dbAll(`SELECT id, round, kickoff, home, away, home_score, away_score, status, result_source FROM fixtures ORDER BY kickoff LIMIT 5`);
     const storedCount = await dbGet(`SELECT COUNT(*) AS c FROM fixtures`);
-    res.json({ url, csvCount, csvErr, sample, storedCount: storedCount.c, storedSample: stored });
+    res.json({ url, contentType, rawLen, csvCount, csvErr, rawSnippet, sample, storedCount: storedCount.c, storedSample: stored });
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
@@ -370,7 +376,7 @@ function fetchJson(url){
     return r.json();
   });
 }
-function parseCsvText(text){
+function parseCsvText(raw){
   const parseCsvLine = (line) => {
     const out=[]; let cur=''; let inQ=false;
     for(let i=0;i<line.length;i++){
@@ -381,9 +387,24 @@ function parseCsvText(text){
     }
     out.push(cur); return out;
   };
-  const lines = String(text).split('\n').map(l=>l.trim()).filter(Boolean);
+  let text = String(raw||'');
+  // The public page returns HTML with the CSV embedded. Isolate the CSV block:
+  // from the header ("idEvent,strTimestamp,...") to just before the footer text.
+  const startMatch = text.match(/idEvent\s*,\s*strTimestamp/i);
+  if(startMatch){
+    text = text.slice(startMatch.index);
+    // Cut off known footer / trailing HTML after the last data row
+    const cut = text.search(/Copy ALL text|<\/|&copy;|\bTimezone:/i);
+    if(cut>0) text = text.slice(0, cut);
+  }
+  // Decode common HTML entities and strip any stray tags
+  text = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+             .replace(/&quot;/g,'"').replace(/&#0?39;/g,"'").replace(/&amp;/g,'&')
+             .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&ntilde;/gi,'ñ');
+  // Normalize line endings (CRLF, CR, or literal "\r\n" sequences)
+  text = text.replace(/\r\n?/g, '\n');
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
   if(!lines.length) return { rows:[], errors:['CSV vacío'] };
-  // Find header line (may have preamble text before it)
   let headIdx = lines.findIndex(l => /idevent/i.test(l) && /strtimestamp/i.test(l));
   if(headIdx<0) headIdx = 0;
   const head = parseCsvLine(lines[headIdx]).map(h=>h.toLowerCase().trim());
