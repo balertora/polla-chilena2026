@@ -7,12 +7,23 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const sqlite3 = require('sqlite3').verbose();
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'polla.db');
+
+// App version = short hash of the client.html being served. Injected into the
+// page (replacing __APP_VERSION__) and sent in every state payload, so a tab
+// running an older build can prompt the user to reload after a deploy.
+let CLIENT_HTML = '', CLIENT_VERSION = '';
+try {
+  const raw = fs.readFileSync(path.join(__dirname, 'client.html'), 'utf8');
+  CLIENT_VERSION = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 8);
+  CLIENT_HTML = raw.replace("const APP_VERSION = '__APP_VERSION__'", `const APP_VERSION = '${CLIENT_VERSION}'`);
+} catch (e) { console.error('client.html load failed:', e.message); }
 
 const app = express();
 app.use(express.json());
@@ -369,6 +380,77 @@ app.get('/api/admin/debug', requireAuth, requireAdmin, async (req, res) => {
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
+app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
+  try{
+    const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled','polla_start'];
+    for(const [k,v] of Object.entries(req.body||{})){
+      if(allowed.includes(k)) await setSetting(k, v);
+    }
+    scheduleBroadcast();
+    res.json({ok:true});
+  }catch(e){ console.error(e); res.status(500).json({error:'Error del servidor'}); }
+});
+
+// Bulk import fixtures from pasted text: "round | YYYY-MM-DD HH:MM | Home | Away"
+// Time is Chile local (UTC-3). Missing time -> 15:00.
+app.post('/api/admin/bulk-fixtures', requireAuth, requireAdmin, async (req, res) => {
+  try{
+    const { text } = req.body || {};
+    if(!text || !String(text).trim()) return res.status(400).json({error:'Texto vacío'});
+    const lines = String(text).split('\n').map(l=>l.trim()).filter(Boolean);
+    let added=0, errors=[];
+    for(const [i,line] of lines.entries()){
+      const parts = line.split('|').map(s=>s.trim());
+      if(parts.length < 4){ errors.push(`Línea ${i+1}: faltan campos`); continue; }
+      const [roundStr, dtStr, home, away] = parts;
+      const round = roundStr!=='' ? parseInt(roundStr,10) : null;
+      let iso = null;
+      const m = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
+      if(m){ iso = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2,'0')}:${m[5]}:00-03:00`).toISOString(); }
+      else {
+        const md = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if(md){ iso = new Date(`${dtStr}T15:00:00-03:00`).toISOString(); }
+        else { errors.push(`Línea ${i+1}: fecha inválida "${dtStr}"`); continue; }
+      }
+      if(!home || !away){ errors.push(`Línea ${i+1}: faltan equipos`); continue; }
+      const id = 'bulk-' + crypto.createHash('md5').update(`${round}|${home}|${away}`).digest('hex').slice(0,10);
+      const existing = await dbGet(`SELECT id FROM fixtures WHERE id=?`,[id]);
+      if(existing){
+        await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?, updated_at=? WHERE id=?`,
+          [round, iso, home, away, new Date().toISOString(), id]);
+      } else {
+        await dbRun(`INSERT INTO fixtures (id, round, kickoff, home, away, status, updated_at) VALUES (?,?,?,?,?,'scheduled',?)`,
+          [id, round, iso, home, away, new Date().toISOString()]);
+      }
+      added++;
+    }
+    scheduleBroadcast();
+    res.json({ ok:true, added, errors });
+  }catch(e){ console.error(e); res.status(500).json({error:e.message}); }
+});
+
+// Admin: reset a user's password -> returns fresh recovery code
+app.post('/api/admin/reset-user/:name', requireAuth, requireAdmin, async (req, res) => {
+  try{
+    const u = await dbGet(`SELECT * FROM users WHERE lower(name)=lower(?)`,[req.params.name]);
+    if(!u) return res.status(404).json({error:'Usuario no encontrado'});
+    const recovery = newRecoveryCode();
+    await dbRun(`UPDATE users SET recovery_hash=? WHERE id=?`,[hashRecovery(recovery), u.id]);
+    res.json({ok:true, name:u.name, recoveryCode:recovery});
+  }catch(e){ console.error(e); res.status(500).json({error:'Error del servidor'}); }
+});
+
+app.delete('/api/admin/users/:name', requireAuth, requireAdmin, async (req, res) => {
+  const u = await dbGet(`SELECT * FROM users WHERE lower(name)=lower(?)`,[req.params.name]);
+  if(!u) return res.status(404).json({error:'Usuario no encontrado'});
+  if(u.id===req.user.id) return res.status(400).json({error:'No puedes eliminarte a ti mismo'});
+  await dbRun(`DELETE FROM users WHERE id=?`,[u.id]);
+  await dbRun(`DELETE FROM predictions WHERE user_id=?`,[u.id]);
+  await dbRun(`DELETE FROM sessions WHERE user_id=?`,[u.id]);
+  scheduleBroadcast();
+  res.json({ok:true});
+});
+
 // Shared CSV parser (used by both URL sync and manual paste import)
 function fetchJson(url){
   return fetch(url, { headers: { 'User-Agent':'polla-chilena/1.0' } }).then(r => {
@@ -609,6 +691,7 @@ async function buildSnapshot(forUser){
   return {
     users: users.map(u=>({ name:u.name, isAdmin:!!u.is_admin, baseline:u.baseline, createdAt:u.created_at })),
     fixtures, adminFixtures, myPreds, otherPreds, live:_liveScores, settings, serverTime: new Date().toISOString(),
+    serverVersion: CLIENT_VERSION,
   };
 }
 
@@ -647,7 +730,10 @@ setInterval(async () => {
 }, 60*1000);
 
 // ── Static + boot ────────────────────────────────────────────
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'client.html')));
+app.get('/', (req, res) => {
+  if(CLIENT_HTML) res.type('html').send(CLIENT_HTML);
+  else res.sendFile(path.join(__dirname, 'client.html'));
+});
 
 initDb().then(async () => {
   server.listen(PORT, () => console.log(`⚽ La Polla Chilena on :${PORT}`));
