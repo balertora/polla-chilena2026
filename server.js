@@ -71,6 +71,7 @@ async function initDb(){
     espn_slug: 'chi.1',          // ESPN league slug for live scores
     sync_enabled: 'true',
     app_name: 'La Polla Chilena',
+    polla_start: '',             // ISO date — games before this are hidden & don't score
   };
   for(const [k,v] of Object.entries(defaults)){
     await dbRun(`INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)`, [k, v]);
@@ -122,12 +123,18 @@ function gamePoints(pred, fx){
 }
 async function computeTotals(){
   const users = await dbAll(`SELECT * FROM users`);
-  const fixtures = await dbAll(`SELECT * FROM fixtures`);
+  const allFixtures = await dbAll(`SELECT * FROM fixtures`);
   const preds = await dbAll(`SELECT * FROM predictions`);
   const predMap = {}; // user_id -> fixture_id -> pred
   for(const p of preds){ (predMap[p.user_id]||(predMap[p.user_id]={}))[p.fixture_id]=p; }
   const now = Date.now();
   const started = fx => fx.kickoff && new Date(fx.kickoff).getTime() <= now;
+
+  // Polla start date: fixtures kicking off before this are excluded entirely
+  const startRaw = await getSetting('polla_start');
+  const startTs = startRaw ? new Date(startRaw).getTime() : null;
+  const fixtures = allFixtures.filter(fx =>
+    !startTs || (fx.kickoff && new Date(fx.kickoff).getTime() >= startTs));
 
   // Per-user per-round scores
   const rounds = [...new Set(fixtures.filter(f=>f.round!=null).map(f=>f.round))];
@@ -145,7 +152,7 @@ async function computeTotals(){
       const p = (predMap[u.id]||{})[fx.id];
       const pts = gamePoints(p, fx);
       if(pts!=null) sum += pts;
-      // Missed: game started, no prediction, game kicked off after user joined
+      // Missed: game started, no prediction, kicked off after user joined
       const missed = started(fx) && (!p || p.home_score==null)
         && fx.kickoff && new Date(fx.kickoff).getTime() > uCreated
         && fx.status!=='postponed';
@@ -337,12 +344,54 @@ app.delete('/api/admin/users/:name', requireAuth, requireAdmin, async (req, res)
 });
 
 app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
-  const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled'];
+  const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled','polla_start'];
   for(const [k,v] of Object.entries(req.body||{})){
     if(allowed.includes(k)) await setSetting(k, v);
   }
   scheduleBroadcast();
   res.json({ok:true});
+});
+
+// Bulk import fixtures from pasted text. One game per line:
+//   round | YYYY-MM-DD HH:MM | Home | Away
+// Time is local Chile time (America/Santiago). Missing time -> 15:00.
+app.post('/api/admin/bulk-fixtures', requireAuth, requireAdmin, async (req, res) => {
+  try{
+    const { text } = req.body || {};
+    if(!text || !String(text).trim()) return res.status(400).json({error:'Texto vacío'});
+    const lines = String(text).split('\n').map(l=>l.trim()).filter(Boolean);
+    let added=0, errors=[];
+    for(const [i,line] of lines.entries()){
+      const parts = line.split('|').map(s=>s.trim());
+      if(parts.length < 4){ errors.push(`Línea ${i+1}: faltan campos`); continue; }
+      const [roundStr, dtStr, home, away] = parts;
+      const round = roundStr!=='' ? parseInt(roundStr,10) : null;
+      // Parse "YYYY-MM-DD HH:MM" as Chile local time (UTC-3, no DST complexity for MVP -> store as -03:00)
+      let iso = null;
+      const m = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
+      if(m){
+        iso = `${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2,'0')}:${m[5]}:00-03:00`;
+        iso = new Date(iso).toISOString();
+      } else {
+        const md = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if(md){ iso = new Date(`${dtStr}T15:00:00-03:00`).toISOString(); }
+        else { errors.push(`Línea ${i+1}: fecha inválida "${dtStr}"`); continue; }
+      }
+      if(!home || !away){ errors.push(`Línea ${i+1}: faltan equipos`); continue; }
+      const id = 'bulk-' + crypto.createHash('md5').update(`${round}|${home}|${away}`).digest('hex').slice(0,10);
+      const existing = await dbGet(`SELECT id FROM fixtures WHERE id=?`,[id]);
+      if(existing){
+        await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?, updated_at=? WHERE id=?`,
+          [round, iso, home, away, new Date().toISOString(), id]);
+      } else {
+        await dbRun(`INSERT INTO fixtures (id, round, kickoff, home, away, status, updated_at) VALUES (?,?,?,?,?,'scheduled',?)`,
+          [id, round, iso, home, away, new Date().toISOString()]);
+      }
+      added++;
+    }
+    scheduleBroadcast();
+    res.json({ ok:true, added, errors });
+  }catch(e){ console.error(e); res.status(500).json({error:e.message}); }
 });
 
 app.post('/api/admin/sync', requireAuth, requireAdmin, async (req, res) => {
@@ -489,7 +538,12 @@ async function pollLive(){
 // ── State snapshot + WebSocket broadcast ─────────────────────
 async function buildSnapshot(forUser){
   const users = await dbAll(`SELECT id, name, is_admin, baseline, created_at FROM users ORDER BY created_at`);
-  const fixtures = await dbAll(`SELECT * FROM fixtures ORDER BY kickoff`);
+  const startRaw = await getSetting('polla_start');
+  const startTs = startRaw ? new Date(startRaw).getTime() : null;
+  const allFixtures = await dbAll(`SELECT * FROM fixtures ORDER BY kickoff`);
+  // Hide fixtures before the polla start date entirely (admin sees all in Admin tab via separate call)
+  const fixtures = allFixtures.filter(fx =>
+    !startTs || (fx.kickoff && new Date(fx.kickoff).getTime() >= startTs));
   const allPreds = await dbAll(`SELECT p.*, u.name AS user_name FROM predictions p JOIN users u ON u.id=p.user_id`);
   const now = Date.now();
   const startedSet = new Set(fixtures.filter(f=>f.kickoff && new Date(f.kickoff).getTime()<=now).map(f=>f.id));
@@ -509,10 +563,13 @@ async function buildSnapshot(forUser){
     espn_slug: await getSetting('espn_slug'),
     sync_enabled: await getSetting('sync_enabled'),
     last_sync: await getSetting('last_sync'),
+    polla_start: startRaw || '',
   };
+  // Admins also get the full fixture list (incl. pre-start) for management
+  const adminFixtures = forUser?.is_admin ? allFixtures : null;
   return {
     users: users.map(u=>({ name:u.name, isAdmin:!!u.is_admin, baseline:u.baseline, createdAt:u.created_at })),
-    fixtures, myPreds, otherPreds, live:_liveScores, settings, serverTime: new Date().toISOString(),
+    fixtures, adminFixtures, myPreds, otherPreds, live:_liveScores, settings, serverTime: new Date().toISOString(),
   };
 }
 

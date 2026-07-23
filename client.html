@@ -8,22 +8,22 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:        #0b1220;   /* deep night */
-  --bg-card:   #131e33;
-  --bg-raised: #1a2740;
-  --border:    rgba(255,255,255,0.08);
-  --text:      #dbe4f0;
-  --text-mut:  #8a99b3;
-  --text-faint:#5b6a84;
-  --rojo:      #e63946;   /* la roja */
-  --rojo-soft: rgba(230,57,70,0.14);
-  --cobre:     #c77b3f;   /* Chilean copper — points & trophies */
-  --cobre-soft:rgba(199,123,63,0.16);
-  --verde:     #4ade80;
-  --verde-soft:rgba(74,222,128,0.12);
-  --mal:       #f87171;
-  --mal-soft:  rgba(248,113,113,0.08);
-  --azul:      #7ea8dc;
+  --bg:        #f4f1ea;   /* warm bone */
+  --bg-card:   #ffffff;
+  --bg-raised: #ebe7dd;
+  --border:    rgba(20,30,50,0.12);
+  --text:      #1a2233;
+  --text-mut:  #5a6577;
+  --text-faint:#96a0b0;
+  --rojo:      #d62839;   /* la roja */
+  --rojo-soft: rgba(214,40,57,0.10);
+  --cobre:     #b5651d;   /* Chilean copper — points & trophies */
+  --cobre-soft:rgba(181,101,29,0.12);
+  --verde:     #1a7f4b;
+  --verde-soft:rgba(26,127,75,0.12);
+  --mal:       #c0392b;
+  --mal-soft:  rgba(192,57,43,0.08);
+  --azul:      #2c6bb0;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html{-webkit-text-size-adjust:100%;}
@@ -46,7 +46,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 @media (prefers-reduced-motion: reduce){ *{animation:none !important; transition:none !important;} }
 
 /* Header */
-.hdr{ position:sticky; top:0; z-index:50; background:rgba(11,18,32,0.92); backdrop-filter:blur(8px);
+.hdr{ position:sticky; top:0; z-index:50; background:rgba(244,241,234,0.92); backdrop-filter:blur(8px);
   border-bottom:1px solid var(--border); }
 .hdr-in{ max-width:1100px; margin:0 auto; padding:0.65rem 1rem; display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; }
 .brand{ font-weight:900; font-size:1.15rem; letter-spacing:-0.01em; color:var(--rojo); white-space:nowrap; }
@@ -68,12 +68,19 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .card{ background:var(--bg-card); border:1px solid var(--border); border-radius:0.85rem; padding:1rem; }
 .muted{ color:var(--text-mut); } .faint{ color:var(--text-faint); }
 
-/* Round chips */
-.chips{ display:flex; gap:0.35rem; overflow-x:auto; padding-bottom:0.4rem; margin-bottom:0.9rem; scrollbar-width:thin; }
-.chip{ padding:0.32rem 0.75rem; border-radius:999px; font-size:0.82rem; white-space:nowrap; cursor:pointer;
-  border:1px solid var(--border); background:transparent; color:var(--text-mut); font-weight:600; }
-.chip.on{ background:var(--rojo-soft); border-color:var(--rojo); color:#ff8f98; }
-.chip.done{ opacity:0.75; }
+/* Fecha navigator: ‹ Fecha N › + dropdown */
+.fecha-nav{ display:flex; align-items:center; gap:0.5rem; margin-bottom:0.9rem; flex-wrap:wrap; }
+.fecha-nav .arrow{ width:2.2rem; height:2.2rem; border-radius:0.5rem; border:1px solid var(--border);
+  background:var(--bg-card); color:var(--text); font-size:1.1rem; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; }
+.fecha-nav .arrow:hover:not(:disabled){ border-color:var(--rojo); color:var(--rojo); }
+.fecha-nav .arrow:disabled{ opacity:0.35; cursor:not-allowed; }
+.fecha-nav select{ font-weight:700; font-family:'Archivo',sans-serif; font-size:1rem; padding:0.5rem 0.8rem;
+  background:var(--bg-card); cursor:pointer; min-width:9rem; }
+.fecha-nav .status-tag{ font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; font-weight:700; }
+.tag-live{ background:var(--mal-soft); color:var(--mal); }
+.tag-done{ background:var(--verde-soft); color:var(--verde); }
+.tag-next{ background:var(--rojo-soft); color:var(--rojo); }
 
 /* Fixture rows (predict) */
 .fx{ background:var(--bg-card); border:1px solid var(--border); border-radius:0.75rem;
@@ -168,7 +175,7 @@ const S = {
   tab: 'predict',            // predict | results | leaderboard | admin
   round: null,               // selected fecha in predict/results
   resRound: null,
-  users: [], fixtures: [], myPreds: {}, otherPreds: {}, live: {}, settings: {},
+  users: [], fixtures: [], adminFixtures: [], myPreds: {}, otherPreds: {}, live: {}, settings: {},
   authView: 'login',         // login | register | forgot | showRecovery
   authErr: '', recoveryCode: '',
   connected: false,
@@ -208,6 +215,7 @@ function connectWS(){
       if(msg.type==='state'){
         Object.assign(S, {
           users: msg.data.users, fixtures: msg.data.fixtures,
+          adminFixtures: msg.data.adminFixtures || msg.data.fixtures,
           myPreds: msg.data.myPreds, otherPreds: msg.data.otherPreds,
           live: msg.data.live, settings: msg.data.settings,
         });
@@ -425,13 +433,42 @@ function fmtWhen(iso){
   return d.toLocaleDateString('es-CL',{weekday:'short',day:'numeric',month:'short'})
     + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
 }
-function chipsHtml(sel, extraClassFn){
+function roundStatus(r){
+  const fxs = S.fixtures.filter(f=>f.round===r);
+  if(!fxs.length) return 'next';
+  if(fxs.some(f=>S.live[f.id])) return 'live';
+  if(fxs.every(f=>f.status==='finished')) return 'done';
+  if(fxs.some(f=>fxStarted(f))) return 'live';
+  return 'next';
+}
+// Fecha navigator: ‹ [dropdown] › with a status tag. `onNav` receives the new round.
+function fechaNav(sel, onNavName){
   const rs = roundsList();
   if(!rs.length) return '';
-  return `<div class="chips">${rs.map(r=>{
-    const cls = ['chip', r===sel?'on':'', extraClassFn?extraClassFn(r):''].join(' ');
-    return `<button class="${cls}" data-round="${r}">F${r}</button>`;
-  }).join('')}</div>`;
+  const idx = rs.indexOf(sel);
+  const st = roundStatus(sel);
+  const tag = st==='live' ? '<span class="status-tag tag-live">en juego</span>'
+            : st==='done' ? '<span class="status-tag tag-done">jugada</span>'
+            : '<span class="status-tag tag-next">próxima</span>';
+  const opts = rs.map(r=>{
+    const s = roundStatus(r);
+    const mark = s==='done'?'✓ ':s==='live'?'● ':'';
+    return `<option value="${r}" ${r===sel?'selected':''}>${mark}Fecha ${r}</option>`;
+  }).join('');
+  return `<div class="fecha-nav">
+    <button class="arrow" data-nav="prev" data-target="${onNavName}" ${idx<=0?'disabled':''}>‹</button>
+    <select data-navsel="${onNavName}">${opts}</select>
+    <button class="arrow" data-nav="next" data-target="${onNavName}" ${idx>=rs.length-1?'disabled':''}>›</button>
+    ${tag}
+  </div>`;
+}
+function bindFechaNav(getSel, setSel){
+  document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{
+    const rs = roundsList(); const idx = rs.indexOf(getSel());
+    const ni = b.dataset.nav==='prev' ? idx-1 : idx+1;
+    if(ni>=0 && ni<rs.length){ setSel(rs[ni]); render(); }
+  });
+  document.querySelectorAll('[data-navsel]').forEach(s=>s.onchange=()=>{ setSel(parseInt(s.value,10)); render(); });
 }
 
 // ── Predict tab ──────────────────────────────────────────────
@@ -442,7 +479,6 @@ function renderPredict(){
   if(S.round==null) S.round = currentRoundDefault();
   const fxs = S.fixtures.filter(f=>f.round===S.round)
     .sort((a,b)=>new Date(a.kickoff||0)-new Date(b.kickoff||0));
-  const doneCls = r => S.fixtures.filter(f=>f.round===r).every(f=>f.status==='finished') ? 'done' : '';
   const rows = fxs.map(fx=>{
     const locked = fxStarted(fx) || fx.status==='finished';
     const p = S.myPreds[fx.id] || {};
@@ -465,16 +501,16 @@ function renderPredict(){
     </div>`;
   }).join('');
   return `
-    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Fecha ${S.round}</h2>
+    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Predicciones</h2>
     <p class="faint" style="font-size:0.82rem;margin-bottom:0.75rem;">
       Puedes predecir cada partido hasta que comience. Si se te olvida uno: <b style="color:var(--mal);">−1 punto</b>.
     </p>
-    ${chipsHtml(S.round, doneCls)}
+    ${fechaNav(S.round, 'predict')}
     ${rows || '<div class="card muted">No hay partidos en esta fecha.</div>'}`;
 }
 const _saveTimers = {};
 function bindPredict(){
-  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ S.round=parseInt(c.dataset.round,10); render(); });
+  bindFechaNav(()=>S.round, r=>{ S.round=r; });
   document.querySelectorAll('.fx input[data-fx]').forEach(inp=>{
     inp.oninput = () => {
       const fid = inp.dataset.fx;
@@ -533,8 +569,8 @@ function renderResults(){
   }).join('');
 
   return `
-    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Resultados — Fecha ${S.resRound}</h2>
-    ${chipsHtml(S.resRound)}
+    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Resultados</h2>
+    ${fechaNav(S.resRound, 'results')}
     <div class="res-scroll"><table class="res">${head}${body}</table></div>
     <p class="faint" style="font-size:0.75rem;margin-top:0.6rem;">
       🎯 verde = marcador exacto (5 pts) · verde = resultado correcto (3 pts) ·
@@ -543,7 +579,7 @@ function renderResults(){
     </p>`;
 }
 function bindResults(){
-  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ S.resRound=parseInt(c.dataset.round,10); render(); });
+  bindFechaNav(()=>S.resRound, r=>{ S.resRound=r; });
 }
 
 // ── Leaderboard tab ──────────────────────────────────────────
@@ -589,13 +625,30 @@ function renderLeaderboard(){
 // ── Admin tab ────────────────────────────────────────────────
 function renderAdmin(){
   const st = S.settings;
-  const fxOptions = [...S.fixtures]
+  const adminFx = S.adminFixtures || S.fixtures;
+  const fxOptions = [...adminFx]
     .sort((a,b)=>new Date(a.kickoff||0)-new Date(b.kickoff||0))
     .map(f=>`<option value="${f.id}">F${f.round??'?'} · ${esc(f.home)} v ${esc(f.away)} (${f.status==='finished'?`${f.home_score}–${f.away_score}`:fmtWhen(f.kickoff)})</option>`).join('');
+  // datetime-local value for polla_start
+  const startLocal = st.polla_start
+    ? new Date(new Date(st.polla_start).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
   return `
     <h2 style="margin-bottom:0.75rem;font-size:1.05rem;">Administración</h2>
 
     <details class="card admin-sec" open>
+      <summary>📅 Inicio de la polla</summary>
+      <div class="admin-body">
+        <p class="faint" style="font-size:0.82rem;">Partidos anteriores a esta fecha/hora <b>no se muestran</b> y no dan ni quitan puntos. Déjalo vacío para incluir toda la temporada.</p>
+        <div class="row">
+          <input id="setStart" type="datetime-local" value="${startLocal}" style="width:14rem;">
+          <button class="btn primary" id="saveStart">Guardar inicio</button>
+          ${st.polla_start?`<button class="btn" id="clearStart">Quitar (incluir todo)</button>`:''}
+        </div>
+        <span class="faint" style="font-size:0.78rem;">Actual: ${st.polla_start?new Date(st.polla_start).toLocaleString('es-CL'):'sin definir (toda la temporada)'}</span>
+      </div>
+    </details>
+
+    <details class="card admin-sec">
       <summary>🔄 Sincronización (fixture + resultados + en vivo)</summary>
       <div class="admin-body">
         <div class="row">
@@ -611,7 +664,22 @@ function renderAdmin(){
           <span class="faint" style="font-size:0.78rem;">Última sync: ${st.last_sync?new Date(st.last_sync).toLocaleString('es-CL'):'nunca'}</span>
         </div>
         <pre id="debugOut" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:0.5rem;padding:0.75rem;font-size:0.72rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word;color:var(--text-mut);"></pre>
-        <p class="faint" style="font-size:0.76rem;">Fixture y resultados finales: TheSportsDB (gratis). Marcadores en vivo: ESPN. Si alguna API falla, puedes cargar/editar todo a mano abajo.</p>
+        <p class="faint" style="font-size:0.76rem;">La API gratis de TheSportsDB a veces solo trae las primeras fechas. Para el fixture completo usa la <b>carga masiva</b> de abajo.</p>
+      </div>
+    </details>
+
+    <details class="card admin-sec">
+      <summary>📥 Carga masiva de partidos</summary>
+      <div class="admin-body">
+        <p class="faint" style="font-size:0.82rem;">Un partido por línea, con este formato (hora de Chile):<br>
+          <code style="color:var(--cobre);">fecha# | AAAA-MM-DD HH:MM | Local | Visita</code><br>
+          Ejemplo:<br>
+          <code style="color:var(--text-mut);">3 | 2026-03-07 20:00 | Colo-Colo | Universidad de Chile</code></p>
+        <textarea id="bulkText" rows="8" placeholder="3 | 2026-03-07 20:00 | Colo-Colo | Universidad de Chile&#10;3 | 2026-03-08 18:00 | Cobresal | Huachipato" style="width:100%;font-family:ui-monospace,monospace;font-size:0.82rem;padding:0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:0.5rem;color:var(--text);"></textarea>
+        <div class="row">
+          <button class="btn primary" id="bulkSubmit">Cargar partidos</button>
+          <span class="faint" style="font-size:0.78rem;">Se pueden re-cargar para actualizar hora/equipos (mismo fecha+equipos = mismo partido).</span>
+        </div>
       </div>
     </details>
 
@@ -667,6 +735,31 @@ function renderAdmin(){
     </details>`;
 }
 function bindAdmin(){
+  const adminFx = S.adminFixtures || S.fixtures;
+  $('#saveStart').onclick = async () => {
+    try{
+      const v = $('#setStart').value;
+      await api('PUT','/api/admin/settings',{ polla_start: v ? new Date(v).toISOString() : '' });
+      toast('Fecha de inicio guardada');
+    }catch(e){ toast(e.message); }
+  };
+  if($('#clearStart')) $('#clearStart').onclick = async () => {
+    try{ await api('PUT','/api/admin/settings',{ polla_start: '' }); toast('Se incluye toda la temporada'); }
+    catch(e){ toast(e.message); }
+  };
+  $('#bulkSubmit').onclick = async () => {
+    const text = $('#bulkText').value;
+    if(!text.trim()) return toast('Pega al menos un partido');
+    $('#bulkSubmit').disabled = true;
+    try{
+      const r = await api('POST','/api/admin/bulk-fixtures',{ text });
+      let msg = `${r.added} partidos cargados`;
+      if(r.errors?.length) msg += ` · ${r.errors.length} con error`;
+      toast(msg);
+      if(r.errors?.length) alert('Errores:\n'+r.errors.join('\n'));
+    }catch(e){ toast(e.message); }
+    $('#bulkSubmit').disabled = false;
+  };
   $('#saveSettings').onclick = async () => {
     try{
       await api('PUT','/api/admin/settings',{
@@ -707,7 +800,7 @@ function bindAdmin(){
   };
   const edSel = $('#edSel');
   const fillEd = () => {
-    const fx = S.fixtures.find(f=>f.id===edSel.value);
+    const fx = adminFx.find(f=>f.id===edSel.value);
     if(!fx) return;
     $('#edRound').value = fx.round ?? '';
     $('#edKick').value = fx.kickoff ? new Date(new Date(fx.kickoff).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
@@ -715,7 +808,7 @@ function bindAdmin(){
     $('#edHS').value = fx.home_score ?? '';
     $('#edAS').value = fx.away_score ?? '';
   };
-  if(edSel && S.fixtures.length){ fillEd(); edSel.onchange = fillEd; }
+  if(edSel && adminFx.length){ fillEd(); edSel.onchange = fillEd; }
   $('#edSave').onclick = async () => {
     try{
       await api('PUT',`/api/admin/fixtures/${encodeURIComponent(edSel.value)}`,{
