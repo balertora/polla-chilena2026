@@ -737,8 +737,33 @@ app.get('/', (req, res) => {
 
 initDb().then(async () => {
   server.listen(PORT, () => console.log(`⚽ La Polla Chilena on :${PORT}`));
-  // Sync fixtures on boot + every 6h; poll live every 60s
-  if((await getSetting('sync_enabled'))==='true') syncFixtures();
-  setInterval(async () => { if((await getSetting('sync_enabled'))==='true') syncFixtures(); }, 6*60*60*1000);
+  // Sync fixtures on boot + every 6h; poll live every 60s.
+  // Wrapped so a network hiccup during boot sync never crashes the process.
+  if((await getSetting('sync_enabled'))==='true') syncFixtures().catch(e=>console.error('boot sync:', e.message));
+  setInterval(async () => {
+    try{ if((await getSetting('sync_enabled'))==='true') await syncFixtures(); }
+    catch(e){ console.error('interval sync:', e.message); }
+  }, 6*60*60*1000);
   setInterval(pollLive, 60*1000);
-});
+}).catch(e => { console.error('initDb failed:', e.message); process.exit(1); });
+
+// ── Graceful shutdown ────────────────────────────────────────
+// Railway sends SIGTERM to the old container when a new deploy goes live.
+// Exiting cleanly (rather than being killed) prevents false "Deploy Crashed"
+// emails: we close the HTTP server + WebSockets + DB, then exit 0.
+let _shuttingDown = false;
+function shutdown(signal){
+  if(_shuttingDown) return;
+  _shuttingDown = true;
+  console.log(`Received ${signal}, shutting down cleanly…`);
+  try{ for(const ws of wsClients.keys()){ try{ ws.close(1001, 'server restarting'); }catch(e){} } }catch(e){}
+  const done = () => { try{ db.close(); }catch(e){} process.exit(0); };
+  server.close(done);
+  // Failsafe: don't hang forever if a connection won't close
+  setTimeout(done, 4000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
+// Last-resort guards so an unexpected error logs instead of crash-looping
+process.on('unhandledRejection', (r) => console.error('unhandledRejection:', r));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', e.message));

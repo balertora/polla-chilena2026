@@ -649,7 +649,7 @@ function renderResults(){
     const liveRowCls = live ? ' class="live-row"' : '';
     return `<tr${liveRowCls}>
       <td class="match-cell">
-        <div class="teams-line">${esc(fx.home)} <span class="faint">v</span> ${esc(fx.away)}</div>
+        <div class="teams-line">${teamBadge(fx.home)}${esc(fx.home)} <span class="faint">v</span> ${esc(fx.away)}${teamBadge(fx.away)}</div>
         ${whenLine}
       </td>
       <td class="score-col">${scoreCell}</td>
