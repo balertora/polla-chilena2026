@@ -772,19 +772,21 @@ initDb().then(async () => {
 }).catch(e => { console.error('initDb failed:', e.message); process.exit(1); });
 
 // ── Graceful shutdown ────────────────────────────────────────
-// Railway sends SIGTERM to the old container when a new deploy goes live.
-// Exiting cleanly (rather than being killed) prevents false "Deploy Crashed"
-// emails: we close the HTTP server + WebSockets + DB, then exit 0.
+// Railway sends SIGTERM to the container on redeploy. Exiting cleanly (code 0)
+// rather than being killed prevents false "Deploy Crashed" emails. We close
+// WebSockets + HTTP server + DB fast, with a short failsafe.
 let _shuttingDown = false;
 function shutdown(signal){
   if(_shuttingDown) return;
   _shuttingDown = true;
   console.log(`Received ${signal}, shutting down cleanly…`);
-  try{ for(const ws of wsClients.keys()){ try{ ws.close(1001, 'server restarting'); }catch(e){} } }catch(e){}
-  const done = () => { try{ db.close(); }catch(e){} process.exit(0); };
-  server.close(done);
-  // Failsafe: don't hang forever if a connection won't close
-  setTimeout(done, 4000).unref();
+  // Close all WebSocket connections and the WS server
+  try{ for(const ws of wsClients.keys()){ try{ ws.terminate(); }catch(e){} } }catch(e){}
+  try{ wss.close(); }catch(e){}
+  const done = () => { try{ db.close(); }catch(e){} console.log('Bye.'); process.exit(0); };
+  try{ server.close(done); }catch(e){ done(); }
+  // Failsafe: exit quickly even if a socket refuses to close
+  setTimeout(done, 1500).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
