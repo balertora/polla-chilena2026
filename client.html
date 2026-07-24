@@ -86,8 +86,9 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .fx{ background:var(--bg-card); border:1px solid var(--border); border-radius:0.75rem;
   padding:0.7rem 0.9rem; margin-bottom:0.5rem; display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; }
 .fx .teams{ flex:1; min-width:0; display:flex; align-items:center; gap:0.5rem; justify-content:center; }
-.fx .team{ font-weight:600; font-size:0.95rem; flex:1; }
-.fx .team.h{ text-align:right; } .fx .team.a{ text-align:left; }
+.fx .team{ font-weight:600; font-size:0.95rem; flex:1; display:flex; align-items:center; gap:0.4rem; }
+.fx .team.h{ justify-content:flex-end; text-align:right; } .fx .team.a{ justify-content:flex-start; text-align:left; }
+.badge{ width:1.5rem; height:1.5rem; object-fit:contain; vertical-align:middle; flex-shrink:0; }
 .fx .when{ width:7.5rem; display:flex; flex-direction:column; line-height:1.25; }
 .fx .when .d{ font-size:0.86rem; color:var(--text-mut); font-weight:600; text-transform:capitalize; }
 .fx .when .t{ font-size:1rem; color:var(--text); font-weight:700; font-family:ui-monospace,monospace; }
@@ -105,7 +106,10 @@ table.res th{ background:var(--bg-raised); text-align:center; font-size:0.8rem; 
   position:sticky; top:0; }
 .match-cell .teams-line{ font-size:0.95rem; font-weight:600; color:var(--text); line-height:1.3; }
 .match-cell .when-line{ font-size:0.82rem; color:var(--text-mut); margin-top:0.1rem; }
-.match-cell .score-line{ margin-top:0.15rem; }
+.score-col{ text-align:center; white-space:nowrap; min-width:5rem; }
+.score-final{ font-size:1.15rem; font-weight:800; color:var(--cobre); font-family:ui-monospace,monospace; }
+.ft-tag{ font-size:0.66rem; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.05em; }
+tr.live-row td{ background:rgba(214,40,57,0.05); }
 table.res th:first-child, table.res td:first-child{ position:sticky; left:0; background:var(--bg-card);
   text-align:left; min-width:11rem; z-index:2; }
 table.res th:first-child{ background:var(--bg-raised); z-index:3; }
@@ -115,8 +119,8 @@ td.pick{ text-align:center; font-family:ui-monospace, monospace; font-weight:600
 .p-bad  { background:var(--mal-soft);  color:var(--mal); }
 .p-miss { color:var(--text-faint); font-style:italic; }
 .p-wait { color:var(--text-faint); }
-.livepill{ color:var(--mal); font-weight:800; }
-.livepill .dot{ animation:pulse 1.2s infinite; font-size:0.65rem; }
+.livepill{ color:var(--mal); font-weight:800; font-size:1.15rem; font-family:ui-monospace,monospace; line-height:1.2; }
+.livepill .dot{ animation:pulse 1.2s infinite; font-size:0.6rem; vertical-align:middle; }
 tr.fecha-sep td{ background:var(--bg); color:var(--cobre); font-weight:700; font-size:0.72rem;
   text-transform:uppercase; letter-spacing:0.07em; }
 
@@ -281,7 +285,36 @@ function gamePoints(pred, fx){
   if(pred.hs===fx.home_score && pred.as===fx.away_score) return 5;
   return outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score) ? 3 : 0;
 }
+// Escudos de los equipos (estáticos, no cambian). Mapa nombre canónico -> URL.
+// Vacío por defecto; llena estas URLs cuando las tengas (click derecho ->
+// copiar dirección de imagen sobre el escudo, o desde TheSportsDB). Si un
+// equipo no tiene URL aquí, simplemente no se muestra logo (no rompe nada).
+const TEAM_BADGES = {
+  'Audax Italiano': '',
+  'Cobresal': '',
+  'Colo-Colo': '',
+  'Coquimbo Unido': '',
+  'Deportes Concepción': '',
+  'Deportes La Serena': '',
+  'Deportes Limache': '',
+  'Everton de Viña del Mar': '',
+  'Huachipato': '',
+  'Ñublense': '',
+  "O'Higgins": '',
+  'Palestino': '',
+  'Unión La Calera': '',
+  'Universidad Católica': '',
+  'Universidad de Chile': '',
+  'Universidad de Concepción': '',
+};
+
 function fxStarted(fx){ return fx.kickoff && new Date(fx.kickoff).getTime() <= Date.now(); }
+// Small team badge <img>, or empty string if we don't have one for this team
+function teamBadge(name){
+  const url = TEAM_BADGES[name];
+  if(!url) return '';
+  return ` <img class="badge" src="${esc(url)}" alt="" loading="lazy" onerror="this.style.display='none'">`;
+}
 
 function predsForUser(name){
   if(name===S.name) return S.myPreds;
@@ -467,7 +500,7 @@ function fmtWhen(iso){
   if(!iso) return 'por definir';
   const d = new Date(iso);
   return d.toLocaleDateString('es-CL',{weekday:'short',day:'numeric',month:'short'})
-    + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+    + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit',hour12:false});
 }
 function fmtDate(iso){
   if(!iso) return 'por definir';
@@ -475,7 +508,7 @@ function fmtDate(iso){
 }
 function fmtTime(iso){
   if(!iso) return '';
-  return new Date(iso).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+  return new Date(iso).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit',hour12:false});
 }
 function roundStatus(r){
   const fxs = S.fixtures.filter(f=>f.round===r);
@@ -533,13 +566,13 @@ function renderPredict(){
         ? '<span class="sus">⏸ suspendido</span>'
         : `<span class="d">${fmtDate(fx.kickoff)}</span><span class="t">${fmtTime(fx.kickoff)}</span>`}</span>
       <div class="teams">
-        <span class="team h">${esc(fx.home)}</span>
+        <span class="team h">${esc(fx.home)}${teamBadge(fx.home)}</span>
         ${locked
           ? `<span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--text-mut);">${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span>`
           : `<input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="h" value="${p.hs??''}">
              <span class="faint">–</span>
              <input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="a" value="${p.as??''}">`}
-        <span class="team a">${esc(fx.away)}</span>
+        <span class="team a">${teamBadge(fx.away)}${esc(fx.away)}</span>
       </div>
       ${locked ? `<span class="lock">🔒</span>`
         : save==='saved' ? `<span class="saved-dot">✓ guardado</span>`
@@ -548,7 +581,7 @@ function renderPredict(){
   }).join('');
   return `
     <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Predicciones</h2>
-    <p class="faint" style="font-size:0.82rem;margin-bottom:0.75rem;">
+    <p class="faint" style="font-size:0.95rem;margin-bottom:0.75rem;">
       Puedes predecir cada partido hasta que comience. Si se te olvida uno: <b style="color:var(--mal);">−1 punto</b>.
     </p>
     ${fechaNav(S.round, 'predict')}
@@ -586,14 +619,14 @@ function renderResults(){
   const fxs = S.fixtures.filter(f=>f.round===S.resRound)
     .sort((a,b)=>new Date(a.kickoff||0)-new Date(b.kickoff||0));
 
-  const head = `<tr><th>Partido</th>${users.map(u=>`<th>${esc(u.name)}</th>`).join('')}</tr>`;
+  const head = `<tr><th>Partido</th><th class="score-col">Marcador</th>${users.map(u=>`<th>${esc(u.name)}</th>`).join('')}</tr>`;
   const body = fxs.map(fx=>{
     const live = S.live[fx.id];
-    let score;
-    if(live) score = `<span class="livepill">${live.hs}–${live.as} <span class="dot">●</span> ${esc(live.clock||'EN VIVO')}</span>`;
-    else if(fx.status==='finished') score = `<b style="color:var(--cobre);font-size:1.05rem;">${fx.home_score}–${fx.away_score}</b> <span class="faint" style="font-size:0.72rem;">FT</span>`;
-    else if(fx.status==='postponed') score = `<span class="faint">suspendido</span>`;
-    else score = '';
+    let scoreCell;
+    if(live) scoreCell = `<span class="livepill">${live.hs}–${live.as}<br><span class="dot">●</span> ${esc(live.clock||'EN VIVO')}</span>`;
+    else if(fx.status==='finished') scoreCell = `<span class="score-final">${fx.home_score}–${fx.away_score}</span><br><span class="ft-tag">Final</span>`;
+    else if(fx.status==='postponed') scoreCell = `<span class="faint">susp.</span>`;
+    else scoreCell = `<span class="faint">–</span>`;
     const compare = fx.status==='finished' && fx.home_score!=null
       ? { home_score: fx.home_score, away_score: fx.away_score, status:'finished' }
       : live ? { home_score: live.hs, away_score: live.as, status:'finished' } : null;
@@ -611,13 +644,16 @@ function renderResults(){
       const cls = pts===5?'p-exact':pts===3?'p-good':'p-bad';
       return `<td class="pick ${cls}">${pts===5?'🎯 ':''}${p.hs}–${p.as}</td>`;
     }).join('');
-    const whenLine = fx.status==='postponed' ? ''
+    const whenLine = fx.status==='postponed' ? '<div class="when-line">suspendido</div>'
       : `<div class="when-line">${fmtDate(fx.kickoff)} · ${fmtTime(fx.kickoff)}</div>`;
-    return `<tr><td class="match-cell">
-      <div class="teams-line">${esc(fx.home)} <span class="faint">v</span> ${esc(fx.away)}</div>
-      ${whenLine}
-      ${score?`<div class="score-line">${score}</div>`:''}
-    </td>${cells}</tr>`;
+    const liveRowCls = live ? ' class="live-row"' : '';
+    return `<tr${liveRowCls}>
+      <td class="match-cell">
+        <div class="teams-line">${esc(fx.home)} <span class="faint">v</span> ${esc(fx.away)}</div>
+        ${whenLine}
+      </td>
+      <td class="score-col">${scoreCell}</td>
+      ${cells}</tr>`;
   }).join('');
 
   // Show the fecha winner for this round if it's complete (respects polla start via computeLeaderboard)
@@ -633,7 +669,7 @@ function renderResults(){
     ${fechaNav(S.resRound, 'results')}
     ${winnerBanner}
     <div class="res-scroll"><table class="res">${head}${body}</table></div>
-    <p class="faint" style="font-size:0.75rem;margin-top:0.6rem;">
+    <p class="faint" style="font-size:0.9rem;margin-top:0.6rem;">
       🎯 verde = marcador exacto (5 pts) · verde = resultado correcto (3 pts) ·
       <span style="color:var(--mal);">rojo</span> = resultado equivocado ·
       <i>−1</i> = no predijo · Los pronósticos de los demás se muestran cuando el partido comienza.
@@ -681,7 +717,7 @@ function renderLeaderboard(){
         ${body}
       </table>
     </div>
-    <p class="faint" style="font-size:0.75rem;margin-top:0.6rem;">
+    <p class="faint" style="font-size:0.9rem;margin-top:0.6rem;">
       5 pts marcador exacto · 3 pts resultado correcto · −1 por partido sin pronóstico ·
       +1 al ganador de cada fecha (empates comparten el punto) ·
       Desempates: Total → Exactos → Resultados.
