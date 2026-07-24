@@ -111,9 +111,8 @@ table.res th{ background:var(--bg-raised); text-align:center; font-size:0.8rem; 
 .ft-tag{ font-size:0.66rem; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.05em; }
 tr.live-row td{ background:rgba(214,40,57,0.05); }
 table.res th:first-child, table.res td:first-child{ position:sticky; left:0; background:var(--bg-card);
-  text-align:left; width:10rem; max-width:10rem; z-index:2; }
+  text-align:left; min-width:11rem; z-index:2; }
 table.res th:first-child{ background:var(--bg-raised); z-index:3; }
-.match-cell .teams-line{ white-space:normal; overflow-wrap:anywhere; }
 td.pick{ text-align:center; font-family:ui-monospace, monospace; font-weight:600; white-space:nowrap; }
 .p-exact{ background:var(--verde-soft); color:var(--verde); }
 .p-good { background:var(--verde-soft); color:var(--verde); }
@@ -163,6 +162,12 @@ td.total{ color:var(--cobre); font-weight:800; font-size:1.05rem; }
 .admin-sec[open] summary{ border-bottom:1px solid var(--border); }
 .admin-body{ padding:0.9rem 1rem; display:flex; flex-direction:column; gap:0.6rem; }
 .row{ display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; }
+.score-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:0.5rem 1rem; }
+.score-grid label{ display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+  font-size:0.88rem; color:var(--text-mut); background:var(--bg); border:1px solid var(--border);
+  border-radius:0.5rem; padding:0.45rem 0.7rem; }
+.score-grid input{ width:4rem; flex-shrink:0; }
+@media (max-width:640px){ .score-grid{ grid-template-columns:1fr; } }
 
 .toast{ position:fixed; bottom:1.2rem; left:50%; transform:translateX(-50%); z-index:200;
   background:var(--bg-raised); border:1px solid var(--border); border-radius:0.6rem;
@@ -171,7 +176,7 @@ td.total{ color:var(--cobre); font-weight:800; font-size:1.05rem; }
 @media (max-width:640px){
   .fx .when{ width:100%; order:-1; }
   table.res th:first-child, table.res td:first-child{ width:6.5rem; max-width:6.5rem; min-width:6.5rem; font-size:0.76rem; }
-  .match-cell .teams-line{ font-size:0.8rem; line-height:1.2; }
+  .match-cell .teams-line{ font-size:0.8rem; line-height:1.2; white-space:normal; overflow-wrap:anywhere; }
   .match-cell .when-line{ font-size:0.72rem; }
   table.res th, table.res td{ padding:0.4rem 0.35rem; font-size:0.78rem; }
   table.lb th, table.lb td{ padding:0.5rem 0.35rem; font-size:0.83rem; }
@@ -764,13 +769,11 @@ function renderAdmin(){
       <summary>🎯 Puntaje</summary>
       <div class="admin-body">
         <p class="faint" style="font-size:0.82rem;">Ajusta cuánto vale cada acierto. Los cambios se aplican de inmediato a toda la tabla.</p>
-        <div class="row">
-          <label class="muted" style="font-size:0.85rem;">Marcador exacto <input id="setExact" type="number" min="0" max="100" step="0.5" value="${st.pts_exact??5}" style="width:4.5rem;"></label>
-          <label class="muted" style="font-size:0.85rem;">Resultado correcto <input id="setCorrect" type="number" min="0" max="100" step="0.5" value="${st.pts_correct??3}" style="width:4.5rem;"></label>
-        </div>
-        <div class="row">
-          <label class="muted" style="font-size:0.85rem;">Penalización por no predecir <input id="setMiss" type="number" min="0" max="100" step="0.5" value="${st.pts_miss??1}" style="width:4.5rem;"></label>
-          <label class="muted" style="font-size:0.85rem;">Ganador de la fecha <input id="setFecha" type="number" min="0" max="100" step="0.5" value="${st.pts_fecha??1}" style="width:4.5rem;"></label>
+        <div class="score-grid">
+          <label>Marcador exacto <input id="setExact" type="number" min="0" max="100" step="0.5" value="${st.pts_exact??5}"></label>
+          <label>Resultado correcto <input id="setCorrect" type="number" min="0" max="100" step="0.5" value="${st.pts_correct??3}"></label>
+          <label>Penalización por no predecir <input id="setMiss" type="number" min="0" max="100" step="0.5" value="${st.pts_miss??1}"></label>
+          <label>Ganador de la fecha <input id="setFecha" type="number" min="0" max="100" step="0.5" value="${st.pts_fecha??1}"></label>
         </div>
         <div class="row">
           <button class="btn primary" id="saveScoring">Guardar puntaje</button>
