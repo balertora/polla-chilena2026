@@ -111,8 +111,9 @@ table.res th{ background:var(--bg-raised); text-align:center; font-size:0.8rem; 
 .ft-tag{ font-size:0.66rem; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.05em; }
 tr.live-row td{ background:rgba(214,40,57,0.05); }
 table.res th:first-child, table.res td:first-child{ position:sticky; left:0; background:var(--bg-card);
-  text-align:left; min-width:11rem; z-index:2; }
+  text-align:left; width:10rem; max-width:10rem; z-index:2; }
 table.res th:first-child{ background:var(--bg-raised); z-index:3; }
+.match-cell .teams-line{ white-space:normal; overflow-wrap:anywhere; }
 td.pick{ text-align:center; font-family:ui-monospace, monospace; font-weight:600; white-space:nowrap; }
 .p-exact{ background:var(--verde-soft); color:var(--verde); }
 .p-good { background:var(--verde-soft); color:var(--verde); }
@@ -169,9 +170,12 @@ td.total{ color:var(--cobre); font-weight:800; font-size:1.05rem; }
 
 @media (max-width:640px){
   .fx .when{ width:100%; order:-1; }
-  table.res th:first-child, table.res td:first-child{ min-width:8.5rem; font-size:0.78rem; }
+  table.res th:first-child, table.res td:first-child{ width:6.5rem; max-width:6.5rem; min-width:6.5rem; font-size:0.76rem; }
+  .match-cell .teams-line{ font-size:0.8rem; line-height:1.2; }
+  .match-cell .when-line{ font-size:0.72rem; }
   table.res th, table.res td{ padding:0.4rem 0.35rem; font-size:0.78rem; }
   table.lb th, table.lb td{ padding:0.5rem 0.35rem; font-size:0.83rem; }
+  .badge{ width:1.1rem; height:1.1rem; }
 }
 </style>
 </head>
@@ -279,11 +283,28 @@ function logoutLocal(){
 // 5 exacto, 3 resultado, 0 malo. -1 olvido. +1 ganador de la fecha.
 // ─────────────────────────────────────────────────────────────
 const outcome = (h,a) => h>a?'H':a>h?'A':'D';
+// Configurable point values (from server settings, with sensible fallbacks)
+function scoringPts(){
+  const s = S.settings || {};
+  const n = (v,d)=>{ const x=parseFloat(v); return isNaN(x)?d:x; };
+  return { exact:n(s.pts_exact,5), correct:n(s.pts_correct,3), miss:n(s.pts_miss,1), fecha:n(s.pts_fecha,1) };
+}
 function gamePoints(pred, fx){
   if(fx.status!=='finished' || fx.home_score==null) return null;
   if(!pred || pred.hs==null || pred.as==null) return null;
-  if(pred.hs===fx.home_score && pred.as===fx.away_score) return 5;
-  return outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score) ? 3 : 0;
+  const P = scoringPts();
+  if(pred.hs===fx.home_score && pred.as===fx.away_score) return P.exact;
+  return outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score) ? P.correct : 0;
+}
+// True if a game-points value counts as an exact score / correct result,
+// independent of the configured point amounts.
+function isExact(pred, fx){
+  return fx.status==='finished' && fx.home_score!=null && pred && pred.hs!=null
+    && pred.hs===fx.home_score && pred.as===fx.away_score;
+}
+function isCorrect(pred, fx){
+  return fx.status==='finished' && fx.home_score!=null && pred && pred.hs!=null
+    && outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score);
 }
 // Escudos de los equipos (estáticos, no cambian). Mapa nombre canónico -> URL.
 // Vacío por defecto; llena estas URLs cuando las tengas (click derecho ->
@@ -333,6 +354,7 @@ function completedRounds(){
 // Full leaderboard computation
 function computeLeaderboard(){
   const comp = completedRounds();
+  const P = scoringPts();
   const rows = S.users.map(u => {
     const preds = predsForUser(u.name);
     const joined = new Date(u.createdAt).getTime();
@@ -343,20 +365,20 @@ function computeLeaderboard(){
       const pts = gamePoints(p, fx);
       if(pts!=null){
         earned += pts;
-        if(pts===5) exact++;
-        if(pts>=3) correct++;
+        if(isExact(p, fx)) exact++;
+        if(isCorrect(p, fx)) correct++;
       }
       const miss = fxStarted(fx) && (!p || p.hs==null)
         && fx.kickoff && new Date(fx.kickoff).getTime() > joined
         && fx.status!=='postponed';
-      if(miss){ earned -= 1; missed++; }
+      if(miss){ earned -= P.miss; missed++; }
       if(fx.round!=null && comp.includes(fx.round)){
-        roundPts[fx.round] = (roundPts[fx.round]||0) + (pts!=null?pts:0) - (miss?1:0);
+        roundPts[fx.round] = (roundPts[fx.round]||0) + (pts!=null?pts:0) - (miss?P.miss:0);
       }
     }
     return { name:u.name, baseline:u.baseline||0, earned, exact, correct, missed, roundPts, fechas:0 };
   });
-  // Ganador de la fecha: +1 per complete round to max scorer(s)
+  // Ganador de la fecha: bonus per complete round to max scorer(s)
   const fechaWinners = {}; // round -> [names]
   for(const r of comp){
     let max = -Infinity;
@@ -367,7 +389,7 @@ function computeLeaderboard(){
       if(row.roundPts[r]===max){ row.fechas++; fechaWinners[r].push(row.name); }
     }
   }
-  for(const row of rows) row.total = row.baseline + row.earned + row.fechas;
+  for(const row of rows) row.total = row.baseline + row.earned + row.fechas * P.fecha;
   // Tiebreakers: Total → Exactos → Resultados
   rows.sort((a,b) => b.total-a.total || b.exact-a.exact || b.correct-a.correct || a.name.localeCompare(b.name));
   // Shared ranks
@@ -582,7 +604,7 @@ function renderPredict(){
   return `
     <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Predicciones</h2>
     <p class="faint" style="font-size:0.95rem;margin-bottom:0.75rem;">
-      Puedes predecir cada partido hasta que comience. Si se te olvida uno: <b style="color:var(--mal);">−1 punto</b>.
+      Puedes predecir cada partido hasta que comience. Si se te olvida uno: <b style="color:var(--mal);">−${scoringPts().miss} ${scoringPts().miss===1?'punto':'puntos'}</b>.
     </p>
     ${fechaNav(S.round, 'predict')}
     ${rows || '<div class="card muted">No hay partidos en esta fecha.</div>'}`;
@@ -637,12 +659,13 @@ function renderResults(){
       if(!p || p.hs==null){
         return fx.status==='postponed'
           ? `<td class="pick p-wait">–</td>`
-          : `<td class="pick p-miss">−1</td>`;
+          : `<td class="pick p-miss">−${scoringPts().miss}</td>`;
       }
       if(!compare) return `<td class="pick p-wait">${p.hs}–${p.as}</td>`;
       const pts = gamePoints(p, compare);
-      const cls = pts===5?'p-exact':pts===3?'p-good':'p-bad';
-      return `<td class="pick ${cls}">${pts===5?'🎯 ':''}${p.hs}–${p.as}</td>`;
+      const ex = isExact(p, compare), co = isCorrect(p, compare);
+      const cls = ex?'p-exact':co?'p-good':'p-bad';
+      return `<td class="pick ${cls}">${ex?'🎯 ':''}${p.hs}–${p.as}</td>`;
     }).join('');
     const whenLine = fx.status==='postponed' ? '<div class="when-line">suspendido</div>'
       : `<div class="when-line">${fmtDate(fx.kickoff)} · ${fmtTime(fx.kickoff)}</div>`;
@@ -670,9 +693,9 @@ function renderResults(){
     ${winnerBanner}
     <div class="res-scroll"><table class="res">${head}${body}</table></div>
     <p class="faint" style="font-size:0.9rem;margin-top:0.6rem;">
-      🎯 verde = marcador exacto (5 pts) · verde = resultado correcto (3 pts) ·
+      🎯 verde = marcador exacto (${scoringPts().exact} pts) · verde = resultado correcto (${scoringPts().correct} pts) ·
       <span style="color:var(--mal);">rojo</span> = resultado equivocado ·
-      <i>−1</i> = no predijo · Los pronósticos de los demás se muestran cuando el partido comienza.
+      <i>−${scoringPts().miss}</i> = no predijo · Los pronósticos de los demás se muestran cuando el partido comienza.
     </p>`;
 }
 function bindResults(){
@@ -718,8 +741,8 @@ function renderLeaderboard(){
       </table>
     </div>
     <p class="faint" style="font-size:0.9rem;margin-top:0.6rem;">
-      5 pts marcador exacto · 3 pts resultado correcto · −1 por partido sin pronóstico ·
-      +1 al ganador de cada fecha (empates comparten el punto) ·
+      ${scoringPts().exact} pts marcador exacto · ${scoringPts().correct} pts resultado correcto · −${scoringPts().miss} por partido sin pronóstico ·
+      +${scoringPts().fecha} al ganador de cada fecha (empates comparten ${scoringPts().fecha===1?'el punto':'los puntos'}) ·
       Desempates: Total → Exactos → Resultados.
     </p>`;
 }
@@ -736,6 +759,25 @@ function renderAdmin(){
     ? new Date(new Date(st.polla_start).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
   return `
     <h2 style="margin-bottom:0.75rem;font-size:1.05rem;">Administración</h2>
+
+    <details class="card admin-sec" open>
+      <summary>🎯 Puntaje</summary>
+      <div class="admin-body">
+        <p class="faint" style="font-size:0.82rem;">Ajusta cuánto vale cada acierto. Los cambios se aplican de inmediato a toda la tabla.</p>
+        <div class="row">
+          <label class="muted" style="font-size:0.85rem;">Marcador exacto <input id="setExact" type="number" min="0" max="100" step="0.5" value="${st.pts_exact??5}" style="width:4.5rem;"></label>
+          <label class="muted" style="font-size:0.85rem;">Resultado correcto <input id="setCorrect" type="number" min="0" max="100" step="0.5" value="${st.pts_correct??3}" style="width:4.5rem;"></label>
+        </div>
+        <div class="row">
+          <label class="muted" style="font-size:0.85rem;">Penalización por no predecir <input id="setMiss" type="number" min="0" max="100" step="0.5" value="${st.pts_miss??1}" style="width:4.5rem;"></label>
+          <label class="muted" style="font-size:0.85rem;">Ganador de la fecha <input id="setFecha" type="number" min="0" max="100" step="0.5" value="${st.pts_fecha??1}" style="width:4.5rem;"></label>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="saveScoring">Guardar puntaje</button>
+          <span class="faint" style="font-size:0.78rem;">La penalización se resta (ej. 1 = −1 por partido sin pronóstico).</span>
+        </div>
+      </div>
+    </details>
 
     <details class="card admin-sec" open>
       <summary>📅 Inicio de la polla</summary>
@@ -850,6 +892,17 @@ function renderAdmin(){
 }
 function bindAdmin(){
   const adminFx = S.adminFixtures || S.fixtures;
+  $('#saveScoring').onclick = async () => {
+    try{
+      await api('PUT','/api/admin/settings',{
+        pts_exact: $('#setExact').value,
+        pts_correct: $('#setCorrect').value,
+        pts_miss: $('#setMiss').value,
+        pts_fecha: $('#setFecha').value,
+      });
+      toast('Puntaje guardado');
+    }catch(e){ toast(e.message); }
+  };
   $('#saveStart').onclick = async () => {
     try{
       const v = $('#setStart').value;

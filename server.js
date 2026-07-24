@@ -83,6 +83,10 @@ async function initDb(){
     sync_enabled: 'true',
     app_name: 'La Polla Chilena',
     polla_start: '',             // ISO date — games before this are hidden & don't score
+    pts_exact: '5',              // points for exact score
+    pts_correct: '3',            // points for correct result (win/draw/loss)
+    pts_miss: '1',               // points SUBTRACTED per un-predicted started game
+    pts_fecha: '1',              // bonus to the top scorer(s) of a completed round
   };
   for(const [k,v] of Object.entries(defaults)){
     await dbRun(`INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)`, [k, v]);
@@ -123,19 +127,28 @@ function requireAdmin(req, res, next){ if(!req.user?.is_admin) return res.status
 app.use(authMiddleware);
 
 // ── Scoring (server copy — used only for late-joiner baseline snapshot) ──
-// 5 exact, 3 correct result, 0 wrong. -1 per missed started game
-// (only games kicking off after the user registered). +1 per fecha win.
-function gamePoints(pred, fx){
+// Point values are configurable via settings (pts_exact/correct/miss/fecha).
+function gamePoints(pred, fx, pts){
   if(fx.status!=='finished' || fx.home_score==null) return null;
   if(!pred || pred.home_score==null || pred.away_score==null) return null;
-  if(pred.home_score===fx.home_score && pred.away_score===fx.away_score) return 5;
+  if(pred.home_score===fx.home_score && pred.away_score===fx.away_score) return pts.exact;
   const o = (h,a)=> h>a?'H':a>h?'A':'D';
-  return o(pred.home_score,pred.away_score)===o(fx.home_score,fx.away_score) ? 3 : 0;
+  return o(pred.home_score,pred.away_score)===o(fx.home_score,fx.away_score) ? pts.correct : 0;
+}
+async function scoringPoints(){
+  const num = async (k, d) => { const v = parseFloat(await getSetting(k)); return isNaN(v)?d:v; };
+  return {
+    exact:   await num('pts_exact', 5),
+    correct: await num('pts_correct', 3),
+    miss:    await num('pts_miss', 1),
+    fecha:   await num('pts_fecha', 1),
+  };
 }
 async function computeTotals(){
   const users = await dbAll(`SELECT * FROM users`);
   const allFixtures = await dbAll(`SELECT * FROM fixtures`);
   const preds = await dbAll(`SELECT * FROM predictions`);
+  const pts = await scoringPoints();
   const predMap = {}; // user_id -> fixture_id -> pred
   for(const p of preds){ (predMap[p.user_id]||(predMap[p.user_id]={}))[p.fixture_id]=p; }
   const now = Date.now();
@@ -161,27 +174,27 @@ async function computeTotals(){
     const uCreated = new Date(u.created_at).getTime();
     for(const fx of fixtures){
       const p = (predMap[u.id]||{})[fx.id];
-      const pts = gamePoints(p, fx);
-      if(pts!=null) sum += pts;
+      const gp = gamePoints(p, fx, pts);
+      if(gp!=null) sum += gp;
       // Missed: game started, no prediction, kicked off after user joined
       const missed = started(fx) && (!p || p.home_score==null)
         && fx.kickoff && new Date(fx.kickoff).getTime() > uCreated
         && fx.status!=='postponed';
-      if(missed) sum -= 1;
+      if(missed) sum -= pts.miss;
       if(fx.round!=null && roundComplete[fx.round]){
         if(!roundScores[fx.round]) roundScores[fx.round]={};
         const cur = roundScores[fx.round][u.id]||0;
-        roundScores[fx.round][u.id] = cur + (pts!=null?pts:0) - (missed?1:0);
+        roundScores[fx.round][u.id] = cur + (gp!=null?gp:0) - (missed?pts.miss:0);
       }
     }
     totals[u.id]=sum;
   }
-  // Fecha winners: +1 to top scorer(s) of each complete round
+  // Fecha winners: bonus to top scorer(s) of each complete round
   for(const r of Object.keys(roundScores)){
     const scores = roundScores[r];
     const max = Math.max(...Object.values(scores));
     for(const [uid, s] of Object.entries(scores)){
-      if(s===max) totals[uid] = (totals[uid]||0) + 1;
+      if(s===max) totals[uid] = (totals[uid]||0) + pts.fecha;
     }
   }
   return totals;
@@ -382,9 +395,18 @@ app.get('/api/admin/debug', requireAuth, requireAdmin, async (req, res) => {
 
 app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
   try{
-    const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled','polla_start'];
+    const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled','polla_start',
+                     'pts_exact','pts_correct','pts_miss','pts_fecha'];
+    const numeric = ['pts_exact','pts_correct','pts_miss','pts_fecha'];
     for(const [k,v] of Object.entries(req.body||{})){
-      if(allowed.includes(k)) await setSetting(k, v);
+      if(!allowed.includes(k)) continue;
+      if(numeric.includes(k)){
+        const n = parseFloat(v);
+        if(isNaN(n) || n<0 || n>100) return res.status(400).json({error:`Valor inválido para ${k} (0–100)`});
+        await setSetting(k, n);
+      } else {
+        await setSetting(k, v);
+      }
     }
     scheduleBroadcast();
     res.json({ok:true});
@@ -678,6 +700,7 @@ async function buildSnapshot(forUser){
       (otherPreds[p.user_name]||(otherPreds[p.user_name]={}))[p.fixture_id] = entry;
     }
   }
+  const pts = await scoringPoints();
   const settings = {
     tsdb_league_id: await getSetting('tsdb_league_id'),
     tsdb_season: await getSetting('tsdb_season'),
@@ -685,6 +708,7 @@ async function buildSnapshot(forUser){
     sync_enabled: await getSetting('sync_enabled'),
     last_sync: await getSetting('last_sync'),
     polla_start: startRaw || '',
+    pts_exact: pts.exact, pts_correct: pts.correct, pts_miss: pts.miss, pts_fecha: pts.fecha,
   };
   // Admins also get the full fixture list (incl. pre-start) for management
   const adminFixtures = forUser?.is_admin ? allFixtures : null;
