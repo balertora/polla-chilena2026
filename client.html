@@ -251,13 +251,21 @@ function checkVersion(data){
 let ws = null, wsRetry = null, _everConnected = false;
 function connectWS(){
   if(!S.token) return;
-  if(ws){ try{ws.close();}catch(e){} }
+  clearTimeout(wsRetry);
+  if(ws){
+    // Detach handlers so a late message or close from the old socket can't
+    // repopulate state or trigger a stray reconnect when switching accounts.
+    try{ ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; ws.close(); }catch(e){}
+    ws = null;
+  }
   const proto = location.protocol==='https:'?'wss':'ws';
   // Show "updating" only on a reconnect (not the very first connect)
   if(_everConnected) showConnBanner('⟳ Actualizando…');
-  ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(S.token)}`);
-  ws.onopen = () => { S.connected = true; _everConnected = true; showConnBanner(''); };
-  ws.onmessage = ev => {
+  const sock = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(S.token)}`);
+  ws = sock;
+  sock.onopen = () => { S.connected = true; _everConnected = true; showConnBanner(''); };
+  sock.onmessage = ev => {
+    if(ws !== sock) return; // ignore messages from a superseded socket
     try{
       const msg = JSON.parse(ev.data);
       if(msg.type==='state'){
@@ -273,16 +281,26 @@ function connectWS(){
       }
     }catch(e){}
   };
-  ws.onclose = ev => {
+  sock.onclose = ev => {
+    if(ws !== sock) return; // a superseded socket closing — ignore
     S.connected = false;
     if(ev.code===4001){ logoutLocal(); render(); return; }
     showConnBanner('⚠ Sin conexión — reconectando…');
     clearTimeout(wsRetry); wsRetry = setTimeout(connectWS, 3000);
   };
 }
+function resetDataState(){
+  // Clear everything tied to a session so data never leaks between accounts
+  // in the same tab (e.g. registering a test user after entering your picks).
+  S.users=[]; S.fixtures=[]; S.adminFixtures=[];
+  S.myPreds={}; S.otherPreds={}; S.live={}; S.settings={};
+  S.loaded=false; S.saveState={};
+  S.round=null; S.resRound=null;
+}
 function logoutLocal(){
   S.token=''; S.name=''; S.isAdmin=false;
   localStorage.removeItem('lpc_token'); localStorage.removeItem('lpc_name'); localStorage.removeItem('lpc_admin');
+  resetDataState();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -506,6 +524,8 @@ function bindAuth(){
   document.querySelectorAll('.auth-box input').forEach(i=>i.onkeydown=e=>{ if(e.key==='Enter') go(); });
 }
 function saveSession(r){
+  // Wipe any prior account's data before adopting the new session
+  resetDataState();
   S.token=r.token; S.name=r.name; S.isAdmin=!!r.isAdmin;
   localStorage.setItem('lpc_token', r.token);
   localStorage.setItem('lpc_name', r.name);
