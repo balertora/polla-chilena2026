@@ -755,6 +755,11 @@ setInterval(async () => {
 
 // ── Static + boot ────────────────────────────────────────────
 app.get('/', (req, res) => {
+  // Never cache the HTML shell — always serve the latest build so users don't
+  // get stuck on an old cached client after a deploy.
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   if(CLIENT_HTML) res.type('html').send(CLIENT_HTML);
   else res.sendFile(path.join(__dirname, 'client.html'));
 });

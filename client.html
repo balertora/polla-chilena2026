@@ -205,6 +205,7 @@ const S = {
   round: null,               // selected fecha in predict/results
   resRound: null,
   users: [], fixtures: [], adminFixtures: [], myPreds: {}, otherPreds: {}, live: {}, settings: {},
+  loaded: false,   // true once the first WebSocket snapshot has arrived
   authView: 'login',         // login | register | forgot | showRecovery
   authErr: '', recoveryCode: '',
   connected: false,
@@ -261,6 +262,7 @@ function connectWS(){
       const msg = JSON.parse(ev.data);
       if(msg.type==='state'){
         checkVersion(msg.data);
+        S.loaded = true;
         Object.assign(S, {
           users: msg.data.users, fixtures: msg.data.fixtures,
           adminFixtures: msg.data.adminFixtures || msg.data.fixtures,
@@ -578,6 +580,7 @@ function bindFechaNav(getSel, setSel){
 // ── Predict tab ──────────────────────────────────────────────
 function renderPredict(){
   if(!S.fixtures.length){
+    if(!S.loaded) return `<div class="card"><p class="muted">Cargando partidos…</p></div>`;
     return `<div class="card"><p class="muted">Aún no hay partidos cargados.${S.isAdmin?' Anda al Admin y sincroniza el fixture.':' El admin todavía no carga el fixture.'}</p></div>`;
   }
   if(S.round==null) S.round = currentRoundDefault();
@@ -640,7 +643,7 @@ function bindPredict(){
 
 // ── Results tab ──────────────────────────────────────────────
 function renderResults(){
-  if(!S.fixtures.length) return `<div class="card muted">Aún no hay partidos cargados.</div>`;
+  if(!S.fixtures.length) return `<div class="card muted">${S.loaded?'Aún no hay partidos cargados.':'Cargando partidos…'}</div>`;
   if(S.resRound==null) S.resRound = currentRoundDefault();
   const users = [...S.users].sort((a,b)=>a.name.localeCompare(b.name));
   const fxs = S.fixtures.filter(f=>f.round===S.resRound)
@@ -709,7 +712,7 @@ function bindResults(){
 
 // ── Leaderboard tab ──────────────────────────────────────────
 function renderLeaderboard(){
-  if(!S.users.length) return `<div class="card muted">Sin usuarios aún.</div>`;
+  if(!S.users.length) return `<div class="card muted">${S.loaded?'Sin usuarios aún.':'Cargando…'}</div>`;
   const { rows, fechaWinners, completed } = computeLeaderboard();
   // Fecha winners — most recent first. Collapsible so it never dominates the page.
   const winnerChips = [...completed].reverse().map(r=>
