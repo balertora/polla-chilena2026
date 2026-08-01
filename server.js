@@ -693,13 +693,18 @@ async function pollLive(){
         const awayC = comp.competitors?.find(c=>c.homeAway==='away');
         if(!homeC || !awayC) continue;
         if(namesMatch(fx.home, homeC.team?.displayName) && namesMatch(fx.away, awayC.team?.displayName)){
-          const state = ev.status?.type?.state; // pre | in | post
-          if(state==='in'){
-            newLive[fx.id] = { hs: parseInt(homeC.score,10), as: parseInt(awayC.score,10), clock: ev.status?.displayClock||'', state };
-          } else if(state==='post' && fx.result_source!=='admin'){
-            // Final: write result
+          const st = ev.status?.type || {};
+          const state = st.state;              // pre | in | post
+          const completed = st.completed===true; // ESPN's definitive "match over" flag
+          const hs = parseInt(homeC.score,10), as = parseInt(awayC.score,10);
+          if(completed && state==='post' && fx.result_source!=='admin'){
+            // Definitively over — write the final result
             await dbRun(`UPDATE fixtures SET home_score=?, away_score=?, status='finished', result_source='espn', updated_at=? WHERE id=?`,
-              [parseInt(homeC.score,10), parseInt(awayC.score,10), new Date().toISOString(), fx.id]);
+              [hs, as, new Date().toISOString(), fx.id]);
+          } else if(state==='in' || (state==='post' && !completed)){
+            // Live, or a transient "post" that isn't truly complete (e.g. halftime
+            // glitches) — show as live, never freeze it as final prematurely.
+            newLive[fx.id] = { hs, as, clock: st.shortDetail || ev.status?.displayClock || '', state };
           }
           break;
         }
