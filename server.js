@@ -393,6 +393,32 @@ app.get('/api/admin/debug', requireAuth, requireAdmin, async (req, res) => {
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
+// Debug live scores: shows the ESPN feed and what matched (admin only)
+app.get('/api/admin/debug-live', requireAuth, requireAdmin, async (req, res) => {
+  try{
+    const slug = await getSetting('espn_slug');
+    const now = Date.now();
+    const ymdOf = (ms) => { const d=new Date(ms); return `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`; };
+    const dates = [...new Set([ymdOf(now-24*3600*1000), ymdOf(now), ymdOf(now+24*3600*1000)])];
+    let espnGames = [];
+    for(const ymd of dates){
+      try{
+        const data = await fetchJson(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${ymd}`);
+        for(const ev of (data?.events||[])){
+          const c = ev.competitions?.[0];
+          const h = c?.competitors?.find(x=>x.homeAway==='home');
+          const a = c?.competitors?.find(x=>x.homeAway==='away');
+          espnGames.push({ home:h?.team?.displayName, away:a?.team?.displayName,
+            hs:h?.score, as:a?.score, state:ev.status?.type?.state, clock:ev.status?.displayClock });
+        }
+      }catch(e){ espnGames.push({error:e.message, date:ymd}); }
+    }
+    const liveWindow = (await dbAll(`SELECT id, home, away, kickoff FROM fixtures WHERE status!='finished' AND kickoff IS NOT NULL`))
+      .filter(f=>{ const k=new Date(f.kickoff).getTime(); return now>=k-10*60*1000 && now<=k+140*60*1000; });
+    res.json({ slug, dates, espnGames, liveWindow, currentLive: _liveScores });
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
+
 app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
   try{
     const allowed = ['tsdb_league_id','tsdb_season','espn_slug','sync_enabled','polla_start',
@@ -647,10 +673,17 @@ async function pollLive(){
     if(!liveWindow.length){ if(Object.keys(_liveScores).length){ _liveScores={}; scheduleBroadcast(); } return; }
 
     const slug = await getSetting('espn_slug');
-    const d = new Date();
-    const ymd = `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`;
-    const data = await fetchJson(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${ymd}`);
-    const events = data?.events || [];
+    // Query a small date range so games near the UTC day boundary aren't missed
+    // (e.g. a 21:00 Chile kickoff is 00:00 UTC the next day).
+    const ymdOf = (ms) => { const d=new Date(ms); return `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`; };
+    const dates = [...new Set([ymdOf(now - 24*3600*1000), ymdOf(now), ymdOf(now + 24*3600*1000)])];
+    let events = [];
+    for(const ymd of dates){
+      try{
+        const data = await fetchJson(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${ymd}`);
+        if(data?.events?.length) events = events.concat(data.events);
+      }catch(e){ /* ignore a single date failure */ }
+    }
     const newLive = {};
     for(const fx of liveWindow){
       for(const ev of events){

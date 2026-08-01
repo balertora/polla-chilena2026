@@ -89,6 +89,16 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .fx .team{ font-weight:600; font-size:0.95rem; flex:1; display:flex; align-items:center; gap:0.4rem; }
 .fx .team.h{ justify-content:flex-end; text-align:right; } .fx .team.a{ justify-content:flex-start; text-align:left; }
 .badge{ width:1.5rem; height:1.5rem; object-fit:contain; vertical-align:middle; flex-shrink:0; }
+.pred-live{ display:flex; flex-direction:column; align-items:center; line-height:1.2; }
+.pred-live .pred-mine{ font-size:0.7rem; color:var(--text-faint); font-family:'Archivo Narrow',sans-serif; }
+.fx.live-fx{ border-color:rgba(214,40,57,0.4); background:rgba(214,40,57,0.04); }
+.today-row{ display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.3rem; border-bottom:1px solid var(--border); }
+.today-row:last-child{ border-bottom:none; }
+.today-row.live-fx{ background:rgba(214,40,57,0.05); border-radius:0.4rem; }
+.today-team{ flex:1; display:flex; align-items:center; gap:0.35rem; font-size:0.9rem; font-weight:600; }
+.today-team.h{ justify-content:flex-end; text-align:right; }
+.today-team.a{ justify-content:flex-start; }
+.today-score{ min-width:5.5rem; text-align:center; white-space:nowrap; }
 .fx .when{ width:7.5rem; display:flex; flex-direction:column; line-height:1.25; }
 .fx .when .d{ font-size:0.86rem; color:var(--text-mut); font-weight:600; text-transform:capitalize; }
 .fx .when .t{ font-size:1rem; color:var(--text); font-weight:700; font-family:ui-monospace,monospace; }
@@ -367,6 +377,22 @@ function predsForUser(name){
   return S.otherPreds[name] || {};
 }
 
+// Returns a fixture view that scores as "finished" using the live score when a
+// game is currently in progress. Used so the leaderboard reflects live results.
+// Final results (status==='finished') take precedence over live.
+function scoringFixture(fx){
+  if(fx.status==='finished' && fx.home_score!=null) return fx;
+  const lv = S.live[fx.id];
+  if(lv && lv.hs!=null && lv.as!=null){
+    return { ...fx, home_score:lv.hs, away_score:lv.as, status:'finished' };
+  }
+  return fx;
+}
+// Is this game currently live (has a live score and not final)?
+function isLiveFx(fx){
+  return fx.status!=='finished' && !!(S.live[fx.id] && S.live[fx.id].hs!=null);
+}
+
 // Complete rounds: every fixture in the round finished
 function completedRounds(){
   const byRound = {};
@@ -380,6 +406,7 @@ function completedRounds(){
 function computeLeaderboard(){
   const comp = completedRounds();
   const P = scoringPts();
+  let anyLive = false;
   const rows = S.users.map(u => {
     const preds = predsForUser(u.name);
     const joined = new Date(u.createdAt).getTime();
@@ -387,11 +414,13 @@ function computeLeaderboard(){
     const roundPts = {}; // round -> pts
     for(const fx of S.fixtures){
       const p = preds[fx.id];
-      const pts = gamePoints(p, fx);
+      const sfx = scoringFixture(fx);       // overlays live score if in progress
+      if(isLiveFx(fx)) anyLive = true;
+      const pts = gamePoints(p, sfx);
       if(pts!=null){
         earned += pts;
-        if(isExact(p, fx)) exact++;
-        if(isCorrect(p, fx)) correct++;
+        if(isExact(p, sfx)) exact++;
+        if(isCorrect(p, sfx)) correct++;
       }
       const miss = fxStarted(fx) && (!p || p.hs==null)
         && fx.kickoff && new Date(fx.kickoff).getTime() > joined
@@ -424,7 +453,7 @@ function computeLeaderboard(){
     if(key!==prev){ rank = i+1; prev = key; }
     row.rank = rank;
   });
-  return { rows, fechaWinners, completed: comp };
+  return { rows, fechaWinners, completed: comp, anyLive };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -611,20 +640,33 @@ function renderPredict(){
     const p = S.myPreds[fx.id] || {};
     const save = S.saveState[fx.id];
     const postponed = fx.status==='postponed';
-    return `<div class="fx ${locked?'locked':''}">
+    const live = S.live[fx.id];
+    // Center block: live score, final score, or prediction inputs
+    let center;
+    if(!locked){
+      center = `<input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="h" value="${p.hs??''}">
+             <span class="faint">–</span>
+             <input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="a" value="${p.as??''}">`;
+    } else if(live){
+      center = `<span class="pred-live"><span class="livepill" style="font-size:1.05rem;">${live.hs}–${live.as} <span class="dot">●</span></span>
+             <span class="pred-mine">tú: ${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span></span>`;
+    } else if(fx.status==='finished'){
+      center = `<span class="pred-live"><span style="font-family:ui-monospace,monospace;font-weight:800;color:var(--cobre);">${fx.home_score}–${fx.away_score}</span>
+             <span class="pred-mine">tú: ${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span></span>`;
+    } else {
+      center = `<span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--text-mut);">${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span>`;
+    }
+    return `<div class="fx ${locked?'locked':''} ${live?'live-fx':''}">
       <span class="when">${postponed
         ? '<span class="sus">⏸ suspendido</span>'
         : `<span class="d">${fmtDate(fx.kickoff)}</span><span class="t">${fmtTime(fx.kickoff)}</span>`}</span>
       <div class="teams">
         <span class="team h">${esc(fx.home)}${teamBadge(fx.home)}</span>
-        ${locked
-          ? `<span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--text-mut);">${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span>`
-          : `<input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="h" value="${p.hs??''}">
-             <span class="faint">–</span>
-             <input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="a" value="${p.as??''}">`}
+        ${center}
         <span class="team a">${teamBadge(fx.away)}${esc(fx.away)}</span>
       </div>
-      ${locked ? `<span class="lock">🔒</span>`
+      ${live ? `<span class="livepill" style="font-size:0.68rem;">● EN VIVO</span>`
+        : locked ? `<span class="lock">🔒</span>`
         : save==='saved' ? `<span class="saved-dot">✓ guardado</span>`
         : save==='saving' ? `<span class="faint" style="font-size:0.75rem;">…</span>` : ''}
     </div>`;
@@ -731,9 +773,37 @@ function bindResults(){
 }
 
 // ── Leaderboard tab ──────────────────────────────────────────
+// Panel with today's games + live scores (like La Polla Mundial)
+function todaysGamesPanel(){
+  const now = new Date();
+  const isToday = iso => {
+    if(!iso) return false;
+    const d = new Date(iso);
+    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
+  };
+  const today = S.fixtures.filter(f=>isToday(f.kickoff))
+    .sort((a,b)=>new Date(a.kickoff)-new Date(b.kickoff));
+  if(!today.length) return '';
+  const rows = today.map(fx=>{
+    const live = S.live[fx.id];
+    let score;
+    if(live) score = `<span class="livepill" style="font-size:0.9rem;">${live.hs}–${live.as} <span class="dot">●</span> ${esc(live.clock||'')}</span>`;
+    else if(fx.status==='finished') score = `<b style="color:var(--cobre);">${fx.home_score}–${fx.away_score}</b> <span class="faint" style="font-size:0.66rem;">FT</span>`;
+    else score = `<span class="faint" style="font-size:0.82rem;">${fmtTime(fx.kickoff)}</span>`;
+    return `<div class="today-row ${live?'live-fx':''}">
+      <span class="today-team h">${esc(fx.home)}${teamBadge(fx.home)}</span>
+      <span class="today-score">${score}</span>
+      <span class="today-team a">${teamBadge(fx.away)}${esc(fx.away)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:0.9rem;padding:0.75rem 0.9rem;">
+    <div style="font-size:0.78rem;font-weight:700;color:var(--text-mut);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">📅 Partidos de hoy</div>
+    ${rows}
+  </div>`;
+}
 function renderLeaderboard(){
   if(!S.users.length) return `<div class="card muted">${S.loaded?'Sin usuarios aún.':'Cargando…'}</div>`;
-  const { rows, fechaWinners, completed } = computeLeaderboard();
+  const { rows, fechaWinners, completed, anyLive } = computeLeaderboard();
   // Fecha winners — most recent first. Collapsible so it never dominates the page.
   const winnerChips = [...completed].reverse().map(r=>
     `<div class="fecha-win">🏆 <b>F${r}</b> ${fechaWinners[r].map(esc).join(', ')}</div>`).join('');
@@ -756,7 +826,9 @@ function renderLeaderboard(){
     </tr>`;
   }).join('');
   return `
-    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Tabla general</h2>
+    <h2 style="margin-bottom:0.6rem;font-size:1.05rem;">Tabla general ${anyLive?'<span class="livepill" style="font-size:0.7rem;">● EN VIVO</span>':''}</h2>
+    ${todaysGamesPanel()}
+    ${anyLive?'<p class="faint" style="font-size:0.8rem;margin-bottom:0.6rem;">La tabla incluye los marcadores en vivo. El bono de ganador de la fecha se otorga solo cuando termina la fecha.</p>':''}
     ${strip}
     <div class="card" style="padding:0;overflow-x:auto;">
       <table class="lb">
