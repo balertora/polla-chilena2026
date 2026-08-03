@@ -914,7 +914,8 @@ function renderAdmin(){
         <div class="row">
           <button class="btn" id="saveSettings">Guardar configuración</button>
           <button class="btn primary" id="syncNow">Sincronizar fixture ahora</button>
-          <button class="btn" id="debugBtn">🔍 Diagnóstico</button>
+          <button class="btn" id="debugBtn">🔍 Diagnóstico fixture</button>
+          <button class="btn" id="debugLiveBtn">📡 Diagnóstico en vivo</button>
           <span class="faint" style="font-size:0.78rem;">Última sync: ${st.last_sync?new Date(st.last_sync).toLocaleString('es-CL'):'nunca'}</span>
         </div>
         <pre id="debugOut" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:0.5rem;padding:0.75rem;font-size:0.72rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word;color:var(--text-mut);"></pre>
@@ -1063,6 +1064,15 @@ function bindAdmin(){
     out.textContent = 'Cargando…';
     try{
       const r = await api('GET','/api/admin/debug');
+      out.textContent = JSON.stringify(r, null, 2);
+    }catch(e){ out.textContent = 'Error: '+e.message; }
+  };
+  $('#debugLiveBtn').onclick = async () => {
+    const out = $('#debugOut');
+    out.style.display = 'block';
+    out.textContent = 'Consultando ESPN…';
+    try{
+      const r = await api('GET','/api/admin/debug-live');
       out.textContent = JSON.stringify(r, null, 2);
     }catch(e){ out.textContent = 'Error: '+e.message; }
   };

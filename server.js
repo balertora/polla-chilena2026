@@ -415,7 +415,13 @@ app.get('/api/admin/debug-live', requireAuth, requireAdmin, async (req, res) => 
     }
     const liveWindow = (await dbAll(`SELECT id, home, away, kickoff FROM fixtures WHERE status!='finished' AND kickoff IS NOT NULL`))
       .filter(f=>{ const k=new Date(f.kickoff).getTime(); return now>=k-10*60*1000 && now<=k+140*60*1000; });
-    res.json({ slug, dates, espnGames, liveWindow, currentLive: _liveScores });
+    // What's stored for today's fixtures (to see wrong FT results and their source)
+    const dayStart = new Date(); dayStart.setUTCHours(0,0,0,0);
+    const storedToday = await dbAll(
+      `SELECT home, away, home_score, away_score, status, result_source, kickoff
+       FROM fixtures WHERE kickoff >= ? AND kickoff < ? ORDER BY kickoff`,
+      [new Date(now-24*3600*1000).toISOString(), new Date(now+24*3600*1000).toISOString()]);
+    res.json({ slug, dates, espnGames, liveWindow, storedToday, currentLive: _liveScores });
   }catch(e){ res.status(500).json({error:e.message}); }
 });
 
