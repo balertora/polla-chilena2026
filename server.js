@@ -561,7 +561,17 @@ function parseCsvText(raw){
     const iso = new Date(`${tm[1]}-${tm[2]}-${tm[3]}T${tm[4]}:${tm[5]}:00Z`).toISOString();
     const hasScore = hsRaw!=='' && asRaw!=='';
     const id = idEvent ? 'tsdb-'+idEvent : 'csv-'+crypto.createHash('md5').update(`${round}|${home}|${away}`).digest('hex').slice(0,10);
-    rows.push({ id, round, iso, home, away, hs:hasScore?parseInt(hsRaw,10):null, as:hasScore?parseInt(asRaw,10):null, finished:hasScore });
+    // A CSV score is only trustworthy as FINAL if the game kicked off long enough
+    // ago that it must be over (>150 min). The TheSportsDB CSV sometimes carries a
+    // partial/in-progress score for a game that's still being played, which would
+    // otherwise freeze the fixture as "finished" at the wrong scoreline and block
+    // live updates. Games with a score but a recent kickoff stay live-eligible.
+    const kickoffMs = new Date(iso).getTime();
+    const longOver = (Date.now() - kickoffMs) > 150*60*1000;
+    const finished = hasScore && longOver;
+    rows.push({ id, round, iso, home, away,
+      hs:hasScore?parseInt(hsRaw,10):null, as:hasScore?parseInt(asRaw,10):null,
+      finished });
   }
   return { rows, errors };
 }
@@ -576,14 +586,29 @@ async function upsertFixtureRows(rows){
                    VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [r.id, r.round, r.iso, r.home, r.away, r.finished?r.hs:null, r.finished?r.as:null,
          r.finished?'finished':'scheduled', r.finished?'csv':null, new Date().toISOString()]);
+    } else if(keepAdmin){
+      // Never touch scores/status of an admin-set result — only refresh schedule
+      await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?, updated_at=? WHERE id=?`,
+        [r.round, r.iso, r.home, r.away, new Date().toISOString(), r.id]);
     } else {
+      // CSV/ESPN-sourced (or unset). Decide the new result state:
+      let hs=existing.home_score, as=existing.away_score, status=existing.status, source=existing.result_source;
+      const espnFrozen = existing.result_source==='espn' && existing.status==='finished';
+      if(r.finished){
+        // CSV says this game is definitively over -> take its final score
+        hs=r.hs; as=r.as; status='finished'; source='csv';
+      } else if(!espnFrozen){
+        // CSV score not yet trustworthy as final. Don't let a stale CSV 'finished'
+        // linger: reopen it so live polling can take over (unless ESPN already
+        // wrote a real final, which we respect).
+        if(existing.result_source==='csv' && existing.status==='finished'){
+          hs=null; as=null; status='scheduled'; source=null;
+        } else if(existing.status!=='postponed'){
+          status = existing.status==='finished' ? 'finished' : 'scheduled';
+        }
+      }
       await dbRun(`UPDATE fixtures SET round=?, kickoff=?, home=?, away=?, home_score=?, away_score=?, status=?, result_source=?, updated_at=? WHERE id=?`,
-        [ r.round, r.iso, r.home, r.away,
-          keepAdmin ? existing.home_score : (r.finished?r.hs:existing.home_score),
-          keepAdmin ? existing.away_score : (r.finished?r.as:existing.away_score),
-          keepAdmin ? existing.status : (r.finished?'finished':(existing.status==='postponed'?'postponed':'scheduled')),
-          keepAdmin ? 'admin' : (r.finished?'csv':existing.result_source),
-          new Date().toISOString(), r.id ]);
+        [ r.round, r.iso, r.home, r.away, hs, as, status, source, new Date().toISOString(), r.id ]);
     }
     count++;
   }
@@ -670,11 +695,11 @@ async function pollLive(){
   try{
     if((await getSetting('sync_enabled'))!=='true') return;
     const now = Date.now();
-    // Any fixture in its live window? (kickoff-10min .. kickoff+140min, not finished)
+    // Any fixture in its live window? (kickoff-10min .. kickoff+160min, not finished)
     const fixtures = await dbAll(`SELECT * FROM fixtures WHERE status != 'finished' AND kickoff IS NOT NULL`);
     const liveWindow = fixtures.filter(f => {
       const k = new Date(f.kickoff).getTime();
-      return now >= k - 10*60*1000 && now <= k + 140*60*1000;
+      return now >= k - 10*60*1000 && now <= k + 160*60*1000;
     });
     if(!liveWindow.length){ if(Object.keys(_liveScores).length){ _liveScores={}; scheduleBroadcast(); } return; }
 
