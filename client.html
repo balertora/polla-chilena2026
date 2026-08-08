@@ -318,6 +318,22 @@ function logoutLocal(){
 // 5 exacto, 3 resultado, 0 malo. -1 olvido. +1 ganador de la fecha.
 // ─────────────────────────────────────────────────────────────
 const outcome = (h,a) => h>a?'H':a>h?'A':'D';
+// Normalize a prediction: if one side has a value and the other is blank, the
+// blank counts as 0 (e.g. someone typed 2 and forgot the 0). Both blank -> no
+// prediction (returns null). Fixes already-stored 2-null picks without migration.
+function normPred(pred){
+  if(!pred) return null;
+  let {hs, as} = pred;
+  if(hs==null && as==null) return null;
+  if(hs==null) hs = 0;
+  if(as==null) as = 0;
+  return { hs, as };
+}
+// Display a prediction as "H–A" with a half-blank side shown as 0, or "–" if none.
+function fmtPred(pred){
+  const p = normPred(pred);
+  return p ? `${p.hs}–${p.as}` : '–';
+}
 // Configurable point values (from server settings, with sensible fallbacks)
 function scoringPts(){
   const s = S.settings || {};
@@ -326,20 +342,23 @@ function scoringPts(){
 }
 function gamePoints(pred, fx){
   if(fx.status!=='finished' || fx.home_score==null) return null;
-  if(!pred || pred.hs==null || pred.as==null) return null;
+  const p = normPred(pred);
+  if(!p) return null;
   const P = scoringPts();
-  if(pred.hs===fx.home_score && pred.as===fx.away_score) return P.exact;
-  return outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score) ? P.correct : 0;
+  if(p.hs===fx.home_score && p.as===fx.away_score) return P.exact;
+  return outcome(p.hs,p.as)===outcome(fx.home_score,fx.away_score) ? P.correct : 0;
 }
 // True if a game-points value counts as an exact score / correct result,
 // independent of the configured point amounts.
 function isExact(pred, fx){
-  return fx.status==='finished' && fx.home_score!=null && pred && pred.hs!=null
-    && pred.hs===fx.home_score && pred.as===fx.away_score;
+  const p = normPred(pred);
+  return fx.status==='finished' && fx.home_score!=null && p
+    && p.hs===fx.home_score && p.as===fx.away_score;
 }
 function isCorrect(pred, fx){
-  return fx.status==='finished' && fx.home_score!=null && pred && pred.hs!=null
-    && outcome(pred.hs,pred.as)===outcome(fx.home_score,fx.away_score);
+  const p = normPred(pred);
+  return fx.status==='finished' && fx.home_score!=null && p
+    && outcome(p.hs,p.as)===outcome(fx.home_score,fx.away_score);
 }
 // Escudos de los equipos (estáticos, no cambian). Mapa nombre canónico -> URL.
 // Vacío por defecto; llena estas URLs cuando las tengas (click derecho ->
@@ -649,12 +668,12 @@ function renderPredict(){
              <input type="number" min="0" max="99" inputmode="numeric" data-fx="${fx.id}" data-side="a" value="${p.as??''}">`;
     } else if(live){
       center = `<span class="pred-live"><span class="livepill" style="font-size:1.05rem;">${live.hs}–${live.as} <span class="dot">●</span></span>
-             <span class="pred-mine">tú: ${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span></span>`;
+             <span class="pred-mine">tú: ${fmtPred(p)}</span></span>`;
     } else if(fx.status==='finished'){
       center = `<span class="pred-live"><span style="font-family:ui-monospace,monospace;font-weight:800;color:var(--cobre);">${fx.home_score}–${fx.away_score}</span>
-             <span class="pred-mine">tú: ${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span></span>`;
+             <span class="pred-mine">tú: ${fmtPred(p)}</span></span>`;
     } else {
-      center = `<span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--text-mut);">${p.hs!=null?`${p.hs}–${p.as}`:'–'}</span>`;
+      center = `<span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--text-mut);">${fmtPred(p)}</span>`;
     }
     return `<div class="fx ${locked?'locked':''} ${live?'live-fx':''}">
       <span class="when">${postponed
@@ -725,17 +744,17 @@ function renderResults(){
     const cells = users.map(u=>{
       const p = predsForUser(u.name)[fx.id];
       const started = fxStarted(fx);
-      if(!started) return `<td class="pick p-wait">${u.name===S.name && p && p.hs!=null ? `${p.hs}–${p.as}` : '·'}</td>`;
-      if(!p || p.hs==null){
+      if(!started) return `<td class="pick p-wait">${u.name===S.name && normPred(p) ? fmtPred(p) : '·'}</td>`;
+      if(!p || (p.hs==null && p.as==null)){
         return fx.status==='postponed'
           ? `<td class="pick p-wait">–</td>`
           : `<td class="pick p-miss">−${scoringPts().miss}</td>`;
       }
-      if(!compare) return `<td class="pick p-wait">${p.hs}–${p.as}</td>`;
+      if(!compare) return `<td class="pick p-wait">${fmtPred(p)}</td>`;
       const pts = gamePoints(p, compare);
       const ex = isExact(p, compare), co = isCorrect(p, compare);
       const cls = ex?'p-exact':co?'p-good':'p-bad';
-      return `<td class="pick ${cls}">${ex?'🎯 ':''}${p.hs}–${p.as}</td>`;
+      return `<td class="pick ${cls}">${ex?'🎯 ':''}${fmtPred(p)}</td>`;
     }).join('');
     const whenLine = fx.status==='postponed' ? '<div class="when-line">suspendido</div>'
       : `<div class="when-line">${fmtDate(fx.kickoff)} · ${fmtTime(fx.kickoff)}</div>`;

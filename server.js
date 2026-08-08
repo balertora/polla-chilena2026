@@ -275,8 +275,12 @@ app.put('/api/predictions/:fixtureId', requireAuth, async (req, res) => {
     if(fx.kickoff && new Date(fx.kickoff).getTime() <= Date.now())
       return res.status(403).json({error:'El partido ya comenzó'});
     const { homeScore, awayScore } = req.body || {};
-    const hs = homeScore==null||homeScore==='' ? null : parseInt(homeScore,10);
-    const as_ = awayScore==null||awayScore==='' ? null : parseInt(awayScore,10);
+    let hs = homeScore==null||homeScore==='' ? null : parseInt(homeScore,10);
+    let as_ = awayScore==null||awayScore==='' ? null : parseInt(awayScore,10);
+    // If one side has a value and the other was left blank, treat the blank as 0
+    // (e.g. someone typed 2 and forgot the 0). Both blank stays "no prediction".
+    if(hs!=null && as_==null) as_ = 0;
+    if(as_!=null && hs==null) hs = 0;
     if((hs!=null && (isNaN(hs)||hs<0||hs>99)) || (as_!=null && (isNaN(as_)||as_<0||as_>99)))
       return res.status(400).json({error:'Marcador inválido'});
     await dbRun(
